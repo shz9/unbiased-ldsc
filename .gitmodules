@@ -1,0 +1,3 @@
+[submodule "ldsc"]
+	path = ldsc
+	url = https://github.com/shz9/ldsc.git
