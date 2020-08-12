@@ -1,7 +1,10 @@
 import pandas as pd
 import numpy as np
 import os
+import sys
 from scipy import stats
+import copy
+import argparse
 from itertools import product
 from gamma_glm_model import get_model_lrt
 from multiprocessing import Pool
@@ -29,10 +32,11 @@ def bin_regression_df(reg_df, ld_colname, w_ld_colname):
 
 
 def compute_annot_stats(annot_file_struct, frq_file_struct,
-                        maf_5_50=True):
+                        maf_5_50=True, alpha=(0., .25, .5, .75, 1.)):
 
-    annot_dfs = []
-    maf_normalized_annot = 0.
+    w_annot_dfs = []
+    mafvar_dfs = []
+    snps_per_maf_bin = [[] for _ in range(10)]
 
     for chr_num in range(22, 0, -1):
 
@@ -49,25 +53,42 @@ def compute_annot_stats(annot_file_struct, frq_file_struct,
         mna_df = pd.merge(frq_df[['SNP', 'MAFVAR']],
                           adf.iloc[:, [2] + list(range(4, len(adf.columns)))])
 
-        maf_normalized_annot += np.dot(mna_df.iloc[:, 2:].values.T, mna_df['MAFVAR'].values)
+        snps_per_maf_bin = [s + list(adf.loc[adf['MAFbin' + str(i)] == 1, 'SNP'].values)
+                            for i, s in enumerate(snps_per_maf_bin, 1)]
 
-        annot_dfs.append(adf.iloc[:, 4:])
+        w_annot_dfs.append(mna_df.iloc[:, 2:])
+        mafvar_dfs.append(mna_df[['MAFVAR']])
 
-    annots = pd.concat(annot_dfs)
+    w_annots = pd.concat(w_annot_dfs)
+    mafvars = pd.concat(mafvar_dfs)
 
-    annots_std = annots.std().values
-    binary_annots = [c for c in annots.columns
-                     if len(np.unique(annots[c])) == 2]
+    w_annots_std = {
+        a: ((mafvars.values**(1. - a))*w_annots).std().values
+        for a in alpha
+    }
 
-    annots_val = annots.values
+    w_annot_sum = {
+        a: np.dot(w_annots.values.T, mafvars.values**(1. - a)).reshape(1, -1)
+        for a in alpha
+    }
+
+    w_annot_cov = {
+        a: np.dot((np.sqrt(mafvars.values ** (1. - a)) * w_annots).values.T,
+                  (np.sqrt(mafvars.values ** (1. - a)) * w_annots).values)
+        for a in alpha
+    }
+
+    binary_annots = [c for c in w_annots.columns
+                     if len(np.unique(w_annots[c])) == 2]
 
     return {
-        'Covariance': np.dot(annots_val.T, annots_val),
-        'M': len(annots_val),  # number of snps
-        'Names': np.array(list(annots.columns)),
+        'Covariance': w_annot_cov,
+        'M': len(w_annots),  # number of snps
+        'Names': np.array(list(w_annots.columns)),
         'Binary annotations': binary_annots,
-        'Annotation std': annots_std,
-        'MAF Normalized sum': maf_normalized_annot
+        'Annotation std': w_annots_std,
+        'Annotation sum': w_annot_sum,
+        'SNPs per MAF bin': snps_per_maf_bin
     }
 
 
@@ -182,36 +203,60 @@ def read_baseline_ldscores(
 def read_modified_ldscores(
         ld_ref_file="output/ld_scores/1000G_Phase3_EUR_mldscores/{ldc}/LD.%d.l2.ldscore.gz",
         ld_w_file="output/ld_scores_weights/1000G_Phase3_EUR_mldscores/{ldc}/LD.%d.l2.ldscore.gz",
-        ld_scores=("LD2", "LD2MAF", "L2")):
+        ld_estimator=("R2", "D2"),
+        alpha=(0., .25, .5, .75, 1.)):
 
     print("> Reading modified LD Scores...")
     data = []
 
-    for ldc in ld_scores:
+    for lde, a in product(ld_estimator, alpha):
+
+        score_symbol = f"{lde}_{a}"
+
+        if score_symbol not in reg_ld_scores:
+            continue
+
         modified_scores, modified_M = read_ld_scores_parallel(
-            ld_ref_file.format(ldc=ldc),
-            ld_w_file.format(ldc=ldc),
-            ldc)
-        modified_scores = modified_scores[ldc]
+            ld_ref_file.format(ldc=score_symbol),
+            ld_w_file.format(ldc=score_symbol),
+            score_symbol)
+
+        modified_scores = modified_scores[score_symbol]
 
         for w_annot in (True, False):
             if w_annot:
                 c_ldsc = modified_scores
                 c_ldsc_M = modified_M
             else:
-                c_ldsc = modified_scores[['CHR', 'SNP', 'base' + ldc, 'w_base' + ldc]]
+                c_ldsc = modified_scores[['CHR', 'SNP', 'base' + score_symbol, 'w_base' + score_symbol]]
                 c_ldsc_M = modified_M[:1, :1]
 
             data.append({
-                'Name': [ldc, 'S-' + ldc][w_annot],
+                'Name': [score_symbol, 'S-' + score_symbol][w_annot],
                 'Annotation': w_annot,
                 'LDScores': c_ldsc,
                 'Counts': c_ldsc_M,
-                'WeightCol': 'w_base' + ldc,
-                'Symbol': ldc
+                'WeightCol': 'w_base' + score_symbol,
+                'Symbol': score_symbol,
+                'alpha': a
             })
 
     return data
+
+
+def predict_chi2(tau, intercept, ld_scores, N):
+    return N*np.dot(ld_scores, tau) + intercept
+
+
+def compute_prediction_metrics(pred_chi2, true_chi2):
+    return {
+        'Mean Predicted Chisq': np.mean(pred_chi2),
+        'SD Predicted Chisq': np.std(pred_chi2),
+        'Mean Difference': np.mean(pred_chi2 - true_chi2),
+        'SD Difference': np.std(pred_chi2 - true_chi2),
+        'Mean Absolute Difference': np.mean(np.abs(pred_chi2 - true_chi2)),
+        'SD Absolute Difference': np.std(np.abs(pred_chi2 - true_chi2))
+    }
 
 # -----------------------------------------
 # Perform regressions:
@@ -224,8 +269,10 @@ def perform_ldsc_regression(ld_scores,
                             lds_filter=True):
 
     trait_name = trait_info['Trait name']
-    output_dir = os.path.join(regres_dir, trait_name)
-    res_cache_dir = os.path.join(cache_dir, trait_name)
+    trait_subdir = os.path.basename(trait_info['File']).replace('.sumstats.gz', '')
+
+    output_dir = os.path.join(regres_dir, trait_subdir)
+    res_cache_dir = os.path.join(cache_dir, trait_subdir)
 
     ss_df = pd.read_csv(trait_info['File'], sep="\t")
     ss_df['CHISQ'] = ss_df['Z']**2
@@ -251,19 +298,25 @@ def perform_ldsc_regression(ld_scores,
         ld_score_names = [c for c in ldc['LDScores'].columns
                           if ldc['Symbol'] in c and c != ldc['WeightCol']]
 
-        if ldc['Symbol'][-len(ldc['Name']):] == 'LD2':
-            ldc['Counts'] = np.array([list(annot_data['MAF Normalized sum'][:len(ld_score_names)])])
+        reg_counts = annot_data['Annotation sum'][ldc['alpha']][:1, :len(ld_score_names)]
+
+        """
+        if ldc['Symbol'][-len(ldc['Name']):] in ['UL2', 'L2', 'LD2']:
+            reg_counts = np.array([list(annot_data['MAF Normalized sum'][:len(ld_score_names)])])
+        else:
+            reg_counts = copy.deepcopy(ldc['Counts'])
+        """
 
         if cache_reg_df:
             write_pbz2(os.path.join(res_cache_dir, f"{ldc['Name']}.pbz2"), (
-                nss_df, ld_score_names, ldc['WeightCol'], ldc['Counts']
+                nss_df, ld_score_names, ldc['WeightCol'], reg_counts, ldc['Counts']
             ))
 
         reg = Hsq(nss_df[['CHISQ']].values,
                   nss_df[ld_score_names].values,
                   nss_df[[ldc['WeightCol']]].values,
                   nss_df[['N']].values,
-                  ldc['Counts'],
+                  reg_counts,
                   old_weights=True)
 
         bin_df = bin_regression_df(nss_df, 'base' + ldc['Symbol'], ldc['WeightCol'])
@@ -273,8 +326,8 @@ def perform_ldsc_regression(ld_scores,
             'binned_dataframe': bin_df,
             'N': nss_df[['N']].values[0],
             'M': annot_data['M'],
-            'counts': ldc['Counts'],
-            'MC': ldc['Counts'][0][0],
+            'Annotation Sum': reg_counts,
+            'Counts': ldc['Counts'],
             'hg2': reg.tot,
             'hg2_se': reg.tot_se,
             'Mean Chi2': np.mean(nss_df['CHISQ']),
@@ -289,17 +342,48 @@ def perform_ldsc_regression(ld_scores,
                                                  nss_df, ld_score_names, ldc['WeightCol'])
         ldc['Regression']['LRT_se'] = 0.0
 
+        pred_chi2 = predict_chi2(reg.coef, reg.intercept,
+                                 nss_df[ld_score_names].values, np.mean(nss_df[['N']].values))
+
+        ldc['Regression']['Predictive Performance'] = {
+            'Overall': compute_prediction_metrics(pred_chi2, nss_df['CHISQ']),
+            'Per MAF bin': {}
+        }
+
+        for i, mafbin in enumerate(annot_data['SNPs per MAF bin']):
+            subset = nss_df['SNP'].isin(mafbin)
+            ldc['Regression']['Predictive Performance']['Per MAF bin'][i + 1] = compute_prediction_metrics(
+                pred_chi2[subset], nss_df.loc[subset, 'CHISQ']
+            )
+
         if ldc['Annotation']:
 
-            overlap_annot = reg._overlap_output(
-                ld_score_names, annot_data['Covariance'],
-                ldc['Counts'], annot_data['M'], True)
+            cov_mat = copy.deepcopy(annot_data['Covariance'][ldc['alpha']])
 
-            coeff_factor = annot_data['Annotation std']*annot_data['M']/reg.tot
+            overlap_annot2 = reg._overlap_output(
+                ld_score_names, cov_mat,
+                reg_counts, reg_counts[0][0], True
+            )
+
+            for i in range(cov_mat.shape[0]):
+                cov_mat[i, :] = ldc['Counts']*cov_mat[i, :] / reg_counts
+
+            overlap_annot = reg._overlap_output(
+                ld_score_names, cov_mat,
+                ldc['Counts'], annot_data['M'], True
+            )
+
+            coeff_factor_orig = annot_data['Annotation std'][1.]*annot_data['M']/reg.tot
+
+            coeff_factor_mod1 = annot_data['Annotation std'][ldc['alpha']] * annot_data['M'] / reg.tot
+            coeff_factor_mod2 = annot_data['Annotation std'][1.]*reg_counts[0][0]/reg.tot
             
             tau_pval = 2.*stats.norm.sf(abs(overlap_annot['Coefficient_z-score'].values))
             tau_pval[tau_pval == 0.] = np.nan
             tau_pval = -np.log10(tau_pval)
+
+            diff_enrichment = reg.cat[0] / ldc['Counts'][0] - (reg.tot - reg.cat[0]) / (ldc['Counts'][0][0] - ldc['Counts'][0])
+            diff_enrichment_se = np.abs(reg.cat_se / ldc['Counts'][0] - (reg.tot - reg.cat_se) / (ldc['Counts'][0][0] - ldc['Counts'][0]))
 
             ldc['Regression']['Annotations'] = {
                 'Names': [ln.replace(ldc['Symbol'], '') for ln in ld_score_names],
@@ -307,26 +391,59 @@ def perform_ldsc_regression(ld_scores,
                 'hg2_se': overlap_annot['Prop._h2_std_error'].values,
                 'enrichment': overlap_annot['Enrichment'].values.clip(min=0.),
                 'enrichment_se': overlap_annot['Enrichment_std_error'].values,
-                'enrichment_pvalue': -np.log10(pd.to_numeric(overlap_annot['Enrichment_p'].values,
-                                                             errors='coerce')),
+                'enrichment2': overlap_annot2['Enrichment'].values.clip(min=0.),
+                'enrichment2_se': overlap_annot2['Enrichment_std_error'].values,
+                'differential_enrichment': diff_enrichment,
+                'differential_enrichment_se': diff_enrichment_se,
                 'tau': overlap_annot['Coefficient'].values,
                 'tau_se': overlap_annot['Coefficient_std_error'].values,
                 'tau_pvalue': tau_pval,
                 'tau_zscore': overlap_annot['Coefficient_z-score'].values,
-                'tau_star': overlap_annot['Coefficient'].values*coeff_factor,
-                'tau_star_se': overlap_annot['Coefficient_std_error'].values*coeff_factor,
+                'tau_star': overlap_annot['Coefficient'].values*coeff_factor_orig,
+                'tau_star_se': overlap_annot['Coefficient_std_error'].values*coeff_factor_orig,
+                'tau_star_w': overlap_annot['Coefficient'].values*coeff_factor_mod1,
+                'tau_star_w_se': overlap_annot['Coefficient_std_error'].values*coeff_factor_mod1,
+                'tau_star_w2': overlap_annot['Coefficient'].values*coeff_factor_mod2,
+                'tau_star_w2_se': overlap_annot['Coefficient_std_error'].values*coeff_factor_mod2,
             }
 
-    final_reg_results = dict([(ldc['Name'], ldc['Regression']) for ldc in all_ld_scores])
+            ldc['Regression']['Annotations']['Predictive Performance'] = {}
 
-    write_pbz2(os.path.join(output_dir, "regression_res.pbz2"),
-               final_reg_results)
+            for an, spn in snps_per_annotation.items():
+
+                ann_subset = nss_df['SNP'].isin(spn)
+
+                ldc['Regression']['Annotations']['Predictive Performance'][an] = {
+                    'Overall': compute_prediction_metrics(pred_chi2[ann_subset], nss_df.loc[ann_subset, 'CHISQ']),
+                    'Per MAF bin': {}
+                }
+
+                for i, mafbin in enumerate(annot_data['SNPs per MAF bin']):
+                    maf_subset = nss_df['SNP'].isin(mafbin)
+                    ldc['Regression']['Annotations']['Predictive Performance'][an]['Per MAF bin'][i + 1] = compute_prediction_metrics(
+                        pred_chi2[ann_subset & maf_subset], nss_df.loc[ann_subset & maf_subset, 'CHISQ']
+                    )
+
+        write_pbz2(os.path.join(output_dir, f"{ldc['Name']}.pbz2"),
+                   ldc['Regression'])
 
 
 if __name__ == '__main__':
     # -----------------------------------------
     # Configurations:
 
+    np.seterr(divide='warn')
+    parser = argparse.ArgumentParser(description='LD Score Regression Using 1000 Genomes Project Data')
+    parser.add_argument('--pop', dest='pop', type=str, default='EUR',
+                        help='The reference population name')
+    parser.add_argument('--ldscores', dest='ld_scores', type=str,
+                        default='R2_1.0',
+                        help='The LD Score to use in the regression')
+
+    args = parser.parse_args()
+
+    ref_pop = args.pop  # Reference population
+    reg_ld_scores = args.ld_scores.split(',')
     cache_reg_df = False
     num_procs = 6
 
@@ -348,18 +465,21 @@ if __name__ == '__main__':
         # Reference data
         sumstats_dir = "data/independent_sumstats/"
         reference_annot_file = "data/ld_scores/1000G_Phase3_EUR_baselineLD_v2.2_ldscores/baselineLD.%d.annot.gz"
-        reference_freq_file = "data/genotype_files/1000G_Phase3_EUR_plinkfiles/1000G.EUR.QC.%d.frq"
+        reference_freq_file = f"data/genotype_files/1000G_Phase3_{ref_pop}_plinkfiles/1000G.{ref_pop}.QC.%d.frq"
 
         # Inputs and outputs:
-        cache_dir = f"cache/regression/UKBB_data/{dir_name_struct}/"
-        sumstats_file = "data/independent_sumstats/ukbb_sumstats_summary.csv"
-        annot_stats_file = f"data/annotations/annotation_data/EUR/{count_file.replace('.', '')}.pbz2"
-        regres_dir = f"results/regression/UKBB_data/{dir_name_struct}/"
+        snps_per_annotation_file = "data/annotations/snps_per_annotation.pbz2"
+        cache_dir = f"cache/regression/{dir_name_struct}/"
+        sumstats_file = "data/independent_sumstats/sumstats_table.csv"
+        annot_stats_file = f"data/annotations/annotation_data/{ref_pop}/{count_file.replace('.', '')}.pbz2"
+        regres_dir = f"results/regression/{ref_pop}/{dir_name_struct}/"
         exclude_annotations = None
         keep_annotations = None
 
         # -----------------------------------------
         # Reading annotation statistics:
+
+        snps_per_annotation = read_pbz2(snps_per_annotation_file)
 
         if os.path.isfile(annot_stats_file):
             print("> Loading annotation statistics...")
@@ -379,6 +499,7 @@ if __name__ == '__main__':
             annot_data['Covariance'] = annot_data['Covariance'][exclude_idx, exclude_idx]
             annot_data['MAF Normalized sum'] = annot_data['MAF Normalized sum'][exclude_idx]
             annot_data['Annotation std'] = annot_data['Annotation std'][exclude_idx]
+            annot_data['Weighted Annotation std'] = annot_data['Weighted Annotation std'][exclude_idx]
             annot_data['Names'] = annot_data['Names'][exclude_idx]
 
         if keep_annotations is not None:
@@ -389,13 +510,14 @@ if __name__ == '__main__':
             annot_data['Covariance'] = annot_data['Covariance'][include_idx, include_idx]
             annot_data['MAF Normalized sum'] = annot_data['MAF Normalized sum'][include_idx]
             annot_data['Annotation std'] = annot_data['Annotation std'][include_idx]
+            annot_data['Weighted Annotation std'] = annot_data['Weighted Annotation std'][include_idx]
             annot_data['Names'] = annot_data['Names'][include_idx]
 
         # -----------------------------------------
         # Reading LD Scores:
         all_ld_scores = []
 
-        all_ld_scores += read_baseline_ldscores()
+        #all_ld_scores += read_baseline_ldscores()
         all_ld_scores += read_modified_ldscores()
 
         common_snps = list(set.intersection(*map(set, [ldc['LDScores']['SNP'] for ldc in all_ld_scores])))
@@ -403,11 +525,29 @@ if __name__ == '__main__':
         # -----------------------------------------
         # Reading sum_stats file:
 
-        ukbb_traits = pd.read_csv(sumstats_file)
+        gwas_traits = pd.read_csv(sumstats_file)
 
-        for _, trait in ukbb_traits.iterrows():
+        args = [
+            (all_ld_scores,
+            trait,
+            annot_data,
+            chi2_filter,
+            lds_filter) for _, trait in gwas_traits.iterrows()
+        ]
+
+        pool = Pool(4)
+        res = pool.starmap(perform_ldsc_regression, args)
+        pool.close()
+        pool.join()
+
+        """
+        for _, trait in gwas_traits.iterrows():
+
             perform_ldsc_regression(
                 all_ld_scores,
                 trait,
-                annot_data
+                annot_data,
+                chi2_filter,
+                lds_filter
             )
+        """

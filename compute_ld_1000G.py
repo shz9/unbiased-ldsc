@@ -9,6 +9,7 @@ import time
 import sys
 import os
 import errno
+import argparse
 from pandas_plink import read_plink1_bin
 from subprocess import check_call
 import csv
@@ -80,12 +81,6 @@ def bincount2D_numba(a, bin_num=9):
 
     return out
 
-
-@njit
-def numba_corr(j, neighb):
-    return np.dot(ngt_ac[:, j], ngt_ac[:, neighb]) / N
-
-
 @njit
 def d_squared_unphased(counts, n):
     """
@@ -150,48 +145,71 @@ def compute_modified_ld_score(j, max_cm_dist=1.):
 
     # D^2 vector with all neighboring SNPs:
     D2 = d_squared_unphased(count_mat[::-1, :], N)
+    D2 = (4. / var_xj) * D2
 
     # --------------------------------------------
     # Compute r^2
-    r2 = numba_corr(j, neighb_snps_idx)**2
-    r2 -= (1. - r2)/(N - 2)
+    uncr_r2 = (np.dot(ngt_ac[:, j], ngt_ac[:, neighb_snps_idx]) / N)**2
+    r2 = uncr_r2 - (1. - uncr_r2)/(N - 2)
 
     # --------------------------------------------
     # Compute scores based on different estimators/assumptions:
-    @njit
-    def matdot(annot_mat, cov_vec):
-        return np.dot(annot_mat.T, cov_vec)
 
     # = = = = = = D^2 based estimators = = = = = =
 
-    D2 = (4. / var_xj) * D2  # - var_xk / N
+    scores = []
 
-    # Lj D^2 estimator
-    Lj = matdot(neighb_snps_annot, D2)
+    for lds in scores_to_compute.values():
 
-    # Lj D^2 MAF-dependent estimator
-    Lj_maf = matdot(neighb_snps_annot / var_xk.reshape(-1, 1), D2)
+        if lds['estimator'] == 'D2':
+            scores.append(
+                np.dot((neighb_snps_annot * (var_xk.reshape(-1, 1)**(-lds['alpha']))).T,
+                       D2)
+            )
+        elif lds['estimator'] == 'R2':
+            scores.append(
+                np.dot((neighb_snps_annot * (var_xk.reshape(-1, 1) ** (1. - lds['alpha']))).T,
+                       r2)
+            )
+        elif lds['estimator'] == 'NR2':
+            scores.append(
+                np.dot((neighb_snps_annot * (var_xk.reshape(-1, 1) ** (1. - lds['alpha']))).T,
+                       uncr_r2)
+            )
+        else:
+            raise Exception(f"LD estimator {lds['estimator']} not implemented!")
 
-    # = = = = = = r^2 based estimators = = = = = =
-    # Estimator based on r^2 with correction (Bulik-Sullivan et al.)
-
-    lj = matdot(neighb_snps_annot * var_xk.reshape(-1, 1), r2)
-
-    lj_maf = matdot(neighb_snps_annot, r2)
-
-    return j, (Lj, Lj_maf, lj, lj_maf)
+    return j, scores
 
 
 if __name__ == '__main__':
 
+    parser = argparse.ArgumentParser(description='LD Score Regression Using 1000 Genomes Project Data')
+    parser.add_argument('--pop', dest='pop', type=str, default='EUR',
+                        help='The population name')
+    parser.add_argument('--weights', dest='weights', action='store_true',
+                        help='Calculate the weights for the LDSC')
+
+    args = parser.parse_args()
+
     # Global parameters
     # ---------------------------------------------------------
-
     dist_measure = "cM"
     annot_start_idx = 6
-    weights = True
-    scores_to_compute = ["LD2", "LD2MAF", "L2", "L2MAF"]
-    population = "AFR"
+    weights = args.weights
+
+    ld_estimator = ['D2', 'R2']  #, 'NR2']
+    alpha = [0., .25, .5, .75, 1.]
+
+    scores_to_compute = {
+        lde + '_' + str(a): {
+            'estimator': lde,
+            'alpha': a
+        }
+        for lde in ld_estimator for a in alpha
+    }
+
+    population = args.pop
 
     # = = = = = = = = = =
     # Computational configurations:
@@ -237,8 +255,6 @@ if __name__ == '__main__':
         N, M = gt_ac.shape
 
         gt_meta['VAR'] = 2.*gt_meta['MAF']*(1. - gt_meta['MAF'])
-        mu = np.mean(gt_meta['VAR'])
-        print("Mean frequency variance:", mu)
 
         # Read the annotations file:
         if weights:
