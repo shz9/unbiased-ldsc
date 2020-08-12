@@ -64,7 +64,7 @@ def compute_annot_stats(annot_file_struct, frq_file_struct,
         w_annot_dfs.append(mna_df)
 
     w_annots = pd.concat(w_annot_dfs)
-    mafvars = w_annots['MAFVAR']
+    mafvars = w_annots[['MAFVAR']].copy()
 
     binary_annots = [c for c in w_annots.columns[2:]
                      if len(np.unique(w_annots[c])) == 2]
