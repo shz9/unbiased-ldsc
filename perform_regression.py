@@ -10,6 +10,7 @@ from gamma_glm_model import get_model_lrt
 from multiprocessing import Pool
 from ldsc.ldscore.regressions import Hsq
 from utils import write_pbz2, read_pbz2
+from Jackknife import Jackknife
 
 
 def bin_regression_df(reg_df, ld_colname, w_ld_colname):
@@ -260,7 +261,13 @@ def weighted_cov(chi2, pred_chi2, w):
     Used to compute weighted correlation as defined by Speed, Holmes and Balding
     https://www.biorxiv.org/content/10.1101/736496v2.full
     """
-    return np.dot(1./w, chi2*pred_chi2)*np.sum(1./w) - np.dot(1./w, chi2)*np.dot(1./w, pred_chi2)
+    return np.dot((1./w).T, chi2*pred_chi2)*np.sum(1./w) - np.dot((1./w).T, chi2)*np.dot((1./w).T, pred_chi2)
+
+
+def weighted_corr(chi2, pred_chi2, w):
+    return weighted_cov(chi2, pred_chi2, w) / np.sqrt(
+        weighted_cov(chi2, chi2, w) * weighted_cov(pred_chi2, pred_chi2, w)
+    )
 
 
 def predict_chi2(tau, intercept, ld_scores, N):
@@ -271,15 +278,34 @@ def compute_prediction_metrics(pred_chi2, true_chi2, w):
 
     w = np.maximum(w, 1.)
 
+    jk = Jackknife([pred_chi2.reshape(-1, 1),
+                    true_chi2.reshape(-1, 1),
+                    w.reshape(-1, 1)], n_blocks=200)
+
     return {
-        'Mean Predicted Chisq': np.mean(pred_chi2),
-        'Mean Difference': np.mean(pred_chi2 - true_chi2),
-        'Weighted Mean Difference': np.mean((1./w)*(pred_chi2 - true_chi2)),
-        'Mean Squared Difference': np.mean((pred_chi2 - true_chi2)**2),
-        'Weighted Squared Mean Difference': np.mean((1. / w) * (pred_chi2 - true_chi2)**2),
-        'Correlation': np.corrcoef(pred_chi2, true_chi2)[0, 1],
-        'Weighted Correlation': weighted_cov(true_chi2, pred_chi2, w) / np.sqrt(
-            weighted_cov(true_chi2, true_chi2, w)*weighted_cov(pred_chi2, pred_chi2, w)
+        'Mean Predicted Chisq': jk.resample(
+            lambda p, t, w: np.array([np.mean(p)]).reshape(-1, 1)
+        ),
+        'Mean True Chisq': jk.resample(
+            lambda p, t, w: np.array([np.mean(t)]).reshape(-1, 1)
+        ),
+        'Mean Difference': jk.resample(
+            lambda p, t, w: np.array([np.mean(p - t)]).reshape(-1, 1)
+        ),
+        'Weighted Mean Difference': jk.resample(
+            lambda p, t, w: np.array([np.mean((1./w)*(p - t))]).reshape(-1, 1)
+        ),
+        'Mean Squared Difference': jk.resample(
+            lambda p, t, w: np.array([np.mean((p - t)**2)]).reshape(-1, 1)
+        ),
+        'Weighted Mean Squared Difference': jk.resample(
+            lambda p, t, w: np.array([np.mean((1./w)*(p - t)**2)]).reshape(-1, 1)
+        ),
+        'Correlation': jk.resample(
+            lambda p, t, w: np.array([np.corrcoef(p.flatten(), t.flatten())[0, 1]]).reshape(-1, 1)
+        ),
+        'Weighted Correlation': jk.resample(
+            lambda p, t, w: np.array([weighted_corr(t, p, w)]).reshape(-1, 1)
         )
     }
 
@@ -372,7 +398,7 @@ def perform_ldsc_regression(ld_scores,
 
         for i in range(1, 11):
             maf_subset = nss_df['SNP'].isin(annot_data['SNPs per Annotation']['MAFbin' + str(i)])
-            ldc['Regression']['Predictive Performance']['Per MAF bin'][i + 1] = compute_prediction_metrics(
+            ldc['Regression']['Predictive Performance']['Per MAF bin'][i] = compute_prediction_metrics(
                 pred_chi2[maf_subset],
                 nss_df.loc[maf_subset, 'CHISQ'],
                 nss_df.loc[maf_subset, ldc['WeightCol']]
