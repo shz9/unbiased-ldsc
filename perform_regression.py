@@ -506,11 +506,10 @@ if __name__ == '__main__':
         # -----------------------------------------
         # Reading annotation statistics:
 
-        snps_per_annotation = read_pbz2(snps_per_annotation_file)
-
-        if os.path.isfile(annot_stats_file):
+        if os.path.isfile(annot_stats_file) and os.path.isfile(snps_per_annotation_file):
             print("> Loading annotation statistics...")
             annot_data = read_pbz2(annot_stats_file)
+            snps_per_annotation = read_pbz2(snps_per_annotation_file)
         else:
             print("> Computing annotation statistics...")
             annot_data = compute_annot_stats(reference_annot_file,
