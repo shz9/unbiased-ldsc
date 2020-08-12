@@ -433,7 +433,7 @@ def perform_ldsc_regression(ld_scores,
 
             ldc['Regression']['Annotations']['Predictive Performance'] = {}
 
-            ann_keys = snps_per_annotation.keys()
+            ann_keys = list(snps_per_annotation.keys())
             for ann_idx in prange(len(ann_keys)):
                 an, spn = ann_keys[ann_idx], snps_per_annotation[ann_keys[ann_idx]]
                 #for an, spn in snps_per_annotation.items():
@@ -566,12 +566,13 @@ if __name__ == '__main__':
             lds_filter) for _, trait in gwas_traits.iterrows()
         ]
 
+        """
         pool = Pool(1)
         res = pool.starmap(perform_ldsc_regression, args)
         pool.close()
-        pool.join()
-
+        pool.join()\
         """
+
         for _, trait in gwas_traits.iterrows():
 
             perform_ldsc_regression(
@@ -581,4 +582,3 @@ if __name__ == '__main__':
                 chi2_filter,
                 lds_filter
             )
-        """
