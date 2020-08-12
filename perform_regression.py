@@ -359,14 +359,18 @@ def perform_ldsc_regression(ld_scores,
                                  nss_df[ld_score_names].values, np.mean(nss_df[['N']].values))
 
         ldc['Regression']['Predictive Performance'] = {
-            'Overall': compute_prediction_metrics(pred_chi2, nss_df['CHISQ']),
+            'Overall': compute_prediction_metrics(pred_chi2,
+                                                  nss_df['CHISQ'],
+                                                  nss_df[ldc['WeightCol']]),
             'Per MAF bin': {}
         }
 
         for i, mafbin in enumerate(annot_data['SNPs per MAF bin']):
             subset = nss_df['SNP'].isin(mafbin)
             ldc['Regression']['Predictive Performance']['Per MAF bin'][i + 1] = compute_prediction_metrics(
-                pred_chi2[subset], nss_df.loc[subset, 'CHISQ']
+                pred_chi2[subset],
+                nss_df.loc[subset, 'CHISQ'],
+                nss_df.loc[subset, ldc['WeightCol']]
             )
 
         if ldc['Annotation']:
@@ -395,8 +399,14 @@ def perform_ldsc_regression(ld_scores,
             tau_pval[tau_pval == 0.] = np.nan
             tau_pval = -np.log10(tau_pval)
 
-            diff_enrichment = reg.cat[0] / ldc['Counts'][0] - (reg.tot - reg.cat[0]) / (ldc['Counts'][0][0] - ldc['Counts'][0])
-            diff_enrichment_se = np.abs(reg.cat_se / ldc['Counts'][0] - (reg.tot - reg.cat_se) / (ldc['Counts'][0][0] - ldc['Counts'][0]))
+            diff_enrichment = (
+                    reg.cat[0] / ldc['Counts'][0] -
+                    (reg.tot - reg.cat[0]) / (ldc['Counts'][0][0] - ldc['Counts'][0])
+            )
+            diff_enrichment_se = (
+                np.abs(reg.cat_se / ldc['Counts'][0] -
+                       (reg.tot - reg.cat_se) / (ldc['Counts'][0][0] - ldc['Counts'][0]))
+            )
 
             ldc['Regression']['Annotations'] = {
                 'Names': [ln.replace(ldc['Symbol'], '') for ln in ld_score_names],
@@ -427,14 +437,18 @@ def perform_ldsc_regression(ld_scores,
                 ann_subset = nss_df['SNP'].isin(spn)
 
                 ldc['Regression']['Annotations']['Predictive Performance'][an] = {
-                    'Overall': compute_prediction_metrics(pred_chi2[ann_subset], nss_df.loc[ann_subset, 'CHISQ']),
+                    'Overall': compute_prediction_metrics(pred_chi2[ann_subset],
+                                                          nss_df.loc[ann_subset, 'CHISQ'],
+                                                          nss_df.loc[ann_subset, ldc['WeightCol']]),
                     'Per MAF bin': {}
                 }
 
                 for i, mafbin in enumerate(annot_data['SNPs per MAF bin']):
                     maf_subset = nss_df['SNP'].isin(mafbin)
                     ldc['Regression']['Annotations']['Predictive Performance'][an]['Per MAF bin'][i + 1] = compute_prediction_metrics(
-                        pred_chi2[ann_subset & maf_subset], nss_df.loc[ann_subset & maf_subset, 'CHISQ']
+                        pred_chi2[ann_subset & maf_subset],
+                        nss_df.loc[ann_subset & maf_subset, 'CHISQ'],
+                        nss_df.loc[ann_subset & maf_subset, ldc['WeightCol']]
                     )
 
         write_pbz2(os.path.join(output_dir, f"{ldc['Name']}.pbz2"),
