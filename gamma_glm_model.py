@@ -299,7 +299,7 @@ def fit_ldscore_model(ld_df, ld_col_names, w_col_name=None,
 
 
 def get_model_lrt(coef, est_intercept,
-                  ld_df, ld_col_names, w_col_name,
+                  ld_df, ld_col_names, ld_weights,
                   chisq_col='CHISQ',
                   null_fit_intercept=False):
 
@@ -307,8 +307,7 @@ def get_model_lrt(coef, est_intercept,
     X[:, 0] = 1.
 
     y = np.fmax(1e-6, ld_df[chisq_col])
-
-    u = np.maximum(ld_df[w_col_name].values, 1.)
+    u = 1./ld_weights
 
     fitted_tau = np.append([est_intercept], coef)
     fitted_ll = gamma_loglik(fitted_tau, X, y, u=u)

@@ -382,8 +382,11 @@ def perform_ldsc_regression(ld_scores,
             'Coefficients': list(zip(ld_score_names, reg.coef))
         }
 
+        ld_weighs = np.sqrt(np.maximum(nss_df[ldc['WeightCol']].values, 1.))
+        ld_weighs /= float(np.sum(ld_weighs))
+
         ldc['Regression']['LRT'] = get_model_lrt(reg.coef, reg.intercept,
-                                                 nss_df, ld_score_names, ldc['WeightCol'])
+                                                 nss_df, ld_score_names, ld_weighs)
         ldc['Regression']['LRT_se'] = 0.0
 
         pred_chi2 = predict_chi2(reg.coef, reg.intercept,
@@ -392,7 +395,7 @@ def perform_ldsc_regression(ld_scores,
         ldc['Regression']['Predictive Performance'] = {
             'Overall': compute_prediction_metrics(pred_chi2,
                                                   nss_df['CHISQ'].values,
-                                                  nss_df[ldc['WeightCol']].values),
+                                                  1./ld_weighs),
             'Per MAF bin': {}
         }
 
@@ -401,7 +404,7 @@ def perform_ldsc_regression(ld_scores,
             ldc['Regression']['Predictive Performance']['Per MAF bin'][i] = compute_prediction_metrics(
                 pred_chi2[maf_subset],
                 nss_df.loc[maf_subset, 'CHISQ'].values,
-                nss_df.loc[maf_subset, ldc['WeightCol']].values
+                1./ld_weighs[maf_subset]
             )
 
         if ldc['Annotation']:
@@ -473,7 +476,7 @@ def perform_ldsc_regression(ld_scores,
                 ldc['Regression']['Annotations']['Predictive Performance'][an] = {
                     'Overall': compute_prediction_metrics(pred_chi2[ann_subset],
                                                           nss_df.loc[ann_subset, 'CHISQ'].values,
-                                                          nss_df.loc[ann_subset, ldc['WeightCol']].values),
+                                                          1. / ld_weighs[ann_subset]),
                     'Per MAF bin': {}
                 }
 
@@ -482,7 +485,7 @@ def perform_ldsc_regression(ld_scores,
                     ldc['Regression']['Annotations']['Predictive Performance'][an]['Per MAF bin'][i] = compute_prediction_metrics(
                         pred_chi2[ann_subset & maf_subset],
                         nss_df.loc[ann_subset & maf_subset, 'CHISQ'].values,
-                        nss_df.loc[ann_subset & maf_subset, ldc['WeightCol']].values
+                        1. / ld_weighs[ann_subset & maf_subset]
                     )
 
         write_pbz2(os.path.join(output_dir, f"{ldc['Name']}.pbz2"),
