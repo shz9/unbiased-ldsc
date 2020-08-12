@@ -278,9 +278,9 @@ def compute_prediction_metrics(pred_chi2, true_chi2, w):
 
     w = np.maximum(w, 1.)
 
-    jk = Jackknife([pred_chi2.reshape(-1, 1),
-                    true_chi2.reshape(-1, 1),
-                    w.reshape(-1, 1)], n_blocks=200)
+    jk = Jackknife([pred_chi2.values.reshape(-1, 1),
+                    true_chi2.values.reshape(-1, 1),
+                    w.values.reshape(-1, 1)], n_blocks=200)
 
     return {
         'Mean Predicted Chisq': jk.resample(
