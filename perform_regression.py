@@ -303,7 +303,7 @@ def compute_prediction_metrics(pred_chi2, true_chi2, w, compute_jknife=True):
         mean_estimates[m] = m_func(pred_chi2, true_chi2, w)
 
         if compute_jknife:
-            b_jk_estimates = jk.sample(m_func)
+            b_jk_estimates = jk.resample(m_func)
 
     if compute_jknife:
         return {
