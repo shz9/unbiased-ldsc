@@ -274,40 +274,46 @@ def predict_chi2(tau, intercept, ld_scores, N):
     return N*np.dot(ld_scores, tau) + intercept
 
 
-def compute_prediction_metrics(pred_chi2, true_chi2, w):
+def compute_prediction_metrics(pred_chi2, true_chi2, w, compute_jknife=True):
 
-    w = np.maximum(w, 1.)
-
-    jk = Jackknife([pred_chi2.reshape(-1, 1),
-                    true_chi2.reshape(-1, 1),
-                    w.reshape(-1, 1)], n_blocks=200)
-
-    return {
-        'Mean Predicted Chisq': jk.resample(
-            lambda p, t, w: np.array([np.mean(p)]).reshape(-1, 1)
-        ),
-        'Mean True Chisq': jk.resample(
-            lambda p, t, w: np.array([np.mean(t)]).reshape(-1, 1)
-        ),
-        'Mean Difference': jk.resample(
-            lambda p, t, w: np.array([np.mean(p - t)]).reshape(-1, 1)
-        ),
-        'Weighted Mean Difference': jk.resample(
-            lambda p, t, w: np.array([np.mean((1./w)*(p - t))]).reshape(-1, 1)
-        ),
-        'Mean Squared Difference': jk.resample(
-            lambda p, t, w: np.array([np.mean((p - t)**2)]).reshape(-1, 1)
-        ),
-        'Weighted Mean Squared Difference': jk.resample(
-            lambda p, t, w: np.array([np.mean((1./w)*(p - t)**2)]).reshape(-1, 1)
-        ),
-        'Correlation': jk.resample(
-            lambda p, t, w: np.array([np.corrcoef(p.flatten(), t.flatten())[0, 1]]).reshape(-1, 1)
-        ),
-        'Weighted Correlation': jk.resample(
-            lambda p, t, w: np.array([weighted_corr(t, p, w)]).reshape(-1, 1)
-        )
+    metric_functions = {
+        'Mean Predicted Chisq': lambda p, t, w: np.array([np.mean(p)]).reshape(-1, 1),
+        'Mean True Chisq': lambda p, t, w: np.array([np.mean(t)]).reshape(-1, 1),
+        'Mean Difference': lambda p, t, w: np.array([np.mean(p - t)]).reshape(-1, 1),
+        'Weighted Mean Difference': lambda p, t, w: np.array([np.mean((1./w)*(p - t))]).reshape(-1, 1),
+        'Mean Squared Difference': lambda p, t, w: np.array([np.mean((p - t)**2)]).reshape(-1, 1),
+        'Weighted Mean Squared Difference': lambda p, t, w: np.array([np.mean((1./w)*(p - t)**2)]).reshape(-1, 1),
+        'Correlation': lambda p, t, w: np.array([np.corrcoef(p.flatten(), t.flatten())[0, 1]]).reshape(-1, 1),
+        'Weighted Correlation': lambda p, t, w: np.array([weighted_corr(t, p, w)]).reshape(-1, 1)
     }
+
+    b_jk_estimates = {}
+    mean_estimates = {}
+
+    if compute_jknife:
+        try:
+            jk = Jackknife([pred_chi2.reshape(-1, 1),
+                            true_chi2.reshape(-1, 1),
+                            w.reshape(-1, 1)], n_blocks=200)
+        except ValueError:
+            compute_jknife = False
+
+    for m, m_func in metric_functions.items():
+
+        mean_estimates[m] = m_func(pred_chi2, true_chi2, w)
+
+        if compute_jknife:
+            b_jk_estimates = jk.sample(m_func)
+
+    if compute_jknife:
+        return {
+            'Mean': mean_estimates,
+            'Block Jackknife': b_jk_estimates
+        }
+    else:
+        return {
+            'Mean': mean_estimates
+        }
 
 # -----------------------------------------
 # Perform regressions:
