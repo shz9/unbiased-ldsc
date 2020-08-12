@@ -278,9 +278,9 @@ def compute_prediction_metrics(pred_chi2, true_chi2, w):
 
     w = np.maximum(w, 1.)
 
-    jk = Jackknife([pred_chi2.values.reshape(-1, 1),
-                    true_chi2.values.reshape(-1, 1),
-                    w.values.reshape(-1, 1)], n_blocks=200)
+    jk = Jackknife([pred_chi2.reshape(-1, 1),
+                    true_chi2.reshape(-1, 1),
+                    w.reshape(-1, 1)], n_blocks=200)
 
     return {
         'Mean Predicted Chisq': jk.resample(
@@ -391,8 +391,8 @@ def perform_ldsc_regression(ld_scores,
 
         ldc['Regression']['Predictive Performance'] = {
             'Overall': compute_prediction_metrics(pred_chi2,
-                                                  nss_df['CHISQ'],
-                                                  nss_df[ldc['WeightCol']]),
+                                                  nss_df['CHISQ'].values,
+                                                  nss_df[ldc['WeightCol'].values]),
             'Per MAF bin': {}
         }
 
@@ -400,8 +400,8 @@ def perform_ldsc_regression(ld_scores,
             maf_subset = nss_df['SNP'].isin(annot_data['SNPs per Annotation']['MAFbin' + str(i)])
             ldc['Regression']['Predictive Performance']['Per MAF bin'][i] = compute_prediction_metrics(
                 pred_chi2[maf_subset],
-                nss_df.loc[maf_subset, 'CHISQ'],
-                nss_df.loc[maf_subset, ldc['WeightCol']]
+                nss_df.loc[maf_subset, 'CHISQ'].values,
+                nss_df.loc[maf_subset, ldc['WeightCol'].values]
             )
 
         if ldc['Annotation']:
@@ -472,8 +472,8 @@ def perform_ldsc_regression(ld_scores,
 
                 ldc['Regression']['Annotations']['Predictive Performance'][an] = {
                     'Overall': compute_prediction_metrics(pred_chi2[ann_subset],
-                                                          nss_df.loc[ann_subset, 'CHISQ'],
-                                                          nss_df.loc[ann_subset, ldc['WeightCol']]),
+                                                          nss_df.loc[ann_subset, 'CHISQ'].values,
+                                                          nss_df.loc[ann_subset, ldc['WeightCol']].values),
                     'Per MAF bin': {}
                 }
 
@@ -481,8 +481,8 @@ def perform_ldsc_regression(ld_scores,
                     maf_subset = nss_df['SNP'].isin(annot_data['SNPs per Annotation']['MAFbin' + str(i)])
                     ldc['Regression']['Annotations']['Predictive Performance'][an]['Per MAF bin'][i] = compute_prediction_metrics(
                         pred_chi2[ann_subset & maf_subset],
-                        nss_df.loc[ann_subset & maf_subset, 'CHISQ'],
-                        nss_df.loc[ann_subset & maf_subset, ldc['WeightCol']]
+                        nss_df.loc[ann_subset & maf_subset, 'CHISQ'].values,
+                        nss_df.loc[ann_subset & maf_subset, ldc['WeightCol'].values]
                     )
 
         write_pbz2(os.path.join(output_dir, f"{ldc['Name']}.pbz2"),
