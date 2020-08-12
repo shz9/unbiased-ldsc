@@ -10,6 +10,7 @@ from gamma_glm_model import get_model_lrt
 from multiprocessing import Pool
 from ldsc.ldscore.regressions import Hsq
 from utils import write_pbz2, read_pbz2
+from numba import prange
 
 
 def bin_regression_df(reg_df, ld_colname, w_ld_colname):
@@ -432,7 +433,10 @@ def perform_ldsc_regression(ld_scores,
 
             ldc['Regression']['Annotations']['Predictive Performance'] = {}
 
-            for an, spn in snps_per_annotation.items():
+            ann_keys = snps_per_annotation.keys()
+            for ann_idx in prange(len(ann_keys)):
+                an, spn = ann_keys[ann_idx], snps_per_annotation[ann_keys[ann_idx]]
+                #for an, spn in snps_per_annotation.items():
 
                 ann_subset = nss_df['SNP'].isin(spn)
 
@@ -562,7 +566,7 @@ if __name__ == '__main__':
             lds_filter) for _, trait in gwas_traits.iterrows()
         ]
 
-        pool = Pool(4)
+        pool = Pool(1)
         res = pool.starmap(perform_ldsc_regression, args)
         pool.close()
         pool.join()
