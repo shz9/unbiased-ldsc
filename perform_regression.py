@@ -41,7 +41,6 @@ def compute_annot_stats(annot_file_struct, frq_file_struct,
     """
 
     w_annot_dfs = []
-    mafvar_dfs = []
     snps_per_maf_bin = [[] for _ in range(10)]
 
     for chr_num in range(22, 0, -1):
@@ -62,11 +61,20 @@ def compute_annot_stats(annot_file_struct, frq_file_struct,
         snps_per_maf_bin = [s + list(adf.loc[adf['MAFbin' + str(i)] == 1, 'SNP'].values)
                             for i, s in enumerate(snps_per_maf_bin, 1)]
 
-        w_annot_dfs.append(mna_df.iloc[:, 2:])
-        mafvar_dfs.append(mna_df[['MAFVAR']])
+        w_annot_dfs.append(mna_df)
 
     w_annots = pd.concat(w_annot_dfs)
-    mafvars = pd.concat(mafvar_dfs)
+    mafvars = w_annots['MAFVAR']
+
+    binary_annots = [c for c in w_annots.columns[2:]
+                     if len(np.unique(w_annots[c])) == 2]
+
+    snps_per_annotation = {
+        b_an: w_annots.loc[w_annots[b_an] == 1, 'SNP'].values for b_an in binary_annots
+        if b_an != 'base' and 'flanking.500' not in b_an
+    }
+
+    w_annots = w_annots.iloc[:, 2:]
 
     w_annots_std = {
         a: ((mafvars.values**(1. - a))*w_annots).std().values
@@ -84,9 +92,6 @@ def compute_annot_stats(annot_file_struct, frq_file_struct,
         for a in alpha
     }
 
-    binary_annots = [c for c in w_annots.columns
-                     if len(np.unique(w_annots[c])) == 2]
-
     return {
         'Covariance': w_annot_cov,
         'M': len(w_annots),  # number of snps
@@ -94,7 +99,7 @@ def compute_annot_stats(annot_file_struct, frq_file_struct,
         'Binary annotations': binary_annots,
         'Annotation std': w_annots_std,
         'Annotation sum': w_annot_sum,
-        'SNPs per MAF bin': snps_per_maf_bin
+        'SNPs per Annotation': snps_per_annotation
     }
 
 
@@ -365,12 +370,12 @@ def perform_ldsc_regression(ld_scores,
             'Per MAF bin': {}
         }
 
-        for i, mafbin in enumerate(annot_data['SNPs per MAF bin']):
-            subset = nss_df['SNP'].isin(mafbin)
+        for i in range(1, 11):
+            maf_subset = nss_df['SNP'].isin(annot_data['SNPs per Annotation']['MAFbin' + str(i)])
             ldc['Regression']['Predictive Performance']['Per MAF bin'][i + 1] = compute_prediction_metrics(
-                pred_chi2[subset],
-                nss_df.loc[subset, 'CHISQ'],
-                nss_df.loc[subset, ldc['WeightCol']]
+                pred_chi2[maf_subset],
+                nss_df.loc[maf_subset, 'CHISQ'],
+                nss_df.loc[maf_subset, ldc['WeightCol']]
             )
 
         if ldc['Annotation']:
@@ -432,7 +437,10 @@ def perform_ldsc_regression(ld_scores,
 
             ldc['Regression']['Annotations']['Predictive Performance'] = {}
 
-            for an, spn in snps_per_annotation.items():
+            for an, spn in annot_data['SNPs per Annotation'].items():
+
+                if 'MAFbin' in an:
+                    continue
 
                 ann_subset = nss_df['SNP'].isin(spn)
 
@@ -443,9 +451,9 @@ def perform_ldsc_regression(ld_scores,
                     'Per MAF bin': {}
                 }
 
-                for i, mafbin in enumerate(annot_data['SNPs per MAF bin']):
-                    maf_subset = nss_df['SNP'].isin(mafbin)
-                    ldc['Regression']['Annotations']['Predictive Performance'][an]['Per MAF bin'][i + 1] = compute_prediction_metrics(
+                for i in range(1, 11):
+                    maf_subset = nss_df['SNP'].isin(annot_data['SNPs per Annotation']['MAFbin' + str(i)])
+                    ldc['Regression']['Annotations']['Predictive Performance'][an]['Per MAF bin'][i] = compute_prediction_metrics(
                         pred_chi2[ann_subset & maf_subset],
                         nss_df.loc[ann_subset & maf_subset, 'CHISQ'],
                         nss_df.loc[ann_subset & maf_subset, ldc['WeightCol']]
@@ -495,7 +503,6 @@ if __name__ == '__main__':
         reference_freq_file = f"data/genotype_files/1000G_Phase3_{ref_pop}_plinkfiles/1000G.{ref_pop}.QC.%d.frq"
 
         # Inputs and outputs:
-        snps_per_annotation_file = "data/annotations/snps_per_annotation.pbz2"
         cache_dir = f"cache/regression/{dir_name_struct}/"
         sumstats_file = "data/independent_sumstats/sumstats_table.csv"
         annot_stats_file = f"data/annotations/annotation_data/{ref_pop}/{count_file.replace('.', '')}.pbz2"
@@ -506,10 +513,9 @@ if __name__ == '__main__':
         # -----------------------------------------
         # Reading annotation statistics:
 
-        if os.path.isfile(annot_stats_file) and os.path.isfile(snps_per_annotation_file):
+        if os.path.isfile(annot_stats_file):
             print("> Loading annotation statistics...")
             annot_data = read_pbz2(annot_stats_file)
-            snps_per_annotation = read_pbz2(snps_per_annotation_file)
         else:
             print("> Computing annotation statistics...")
             annot_data = compute_annot_stats(reference_annot_file,
