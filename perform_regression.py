@@ -34,6 +34,12 @@ def bin_regression_df(reg_df, ld_colname, w_ld_colname):
 def compute_annot_stats(annot_file_struct, frq_file_struct,
                         maf_5_50=True, alpha=(0., .25, .5, .75, 1.)):
 
+    """
+    This function compute statistics for the model annotations,
+    including covariance between the annotations, snps per maf bin,
+    and sums and MAF-weighted sums of each annotation.
+    """
+
     w_annot_dfs = []
     mafvar_dfs = []
     snps_per_maf_bin = [[] for _ in range(10)]
@@ -244,18 +250,32 @@ def read_modified_ldscores(
     return data
 
 
+def weighted_cov(chi2, pred_chi2, w):
+    """
+    Used to compute weighted correlation as defined by Speed, Holmes and Balding
+    https://www.biorxiv.org/content/10.1101/736496v2.full
+    """
+    return np.dot(1./w, chi2*pred_chi2)*np.sum(1./w) - np.dot(1./w, chi2)*np.dot(1./w, pred_chi2)
+
+
 def predict_chi2(tau, intercept, ld_scores, N):
     return N*np.dot(ld_scores, tau) + intercept
 
 
-def compute_prediction_metrics(pred_chi2, true_chi2):
+def compute_prediction_metrics(pred_chi2, true_chi2, w):
+
+    w = np.maximum(w, 1.)
+
     return {
         'Mean Predicted Chisq': np.mean(pred_chi2),
-        'SD Predicted Chisq': np.std(pred_chi2),
         'Mean Difference': np.mean(pred_chi2 - true_chi2),
-        'SD Difference': np.std(pred_chi2 - true_chi2),
-        'Mean Absolute Difference': np.mean(np.abs(pred_chi2 - true_chi2)),
-        'SD Absolute Difference': np.std(np.abs(pred_chi2 - true_chi2))
+        'Weighted Mean Difference': np.mean((1./w)*(pred_chi2 - true_chi2)),
+        'Mean Squared Difference': np.mean((pred_chi2 - true_chi2)**2),
+        'Weighted Squared Mean Difference': np.mean((1. / w) * (pred_chi2 - true_chi2)**2),
+        'Correlation': np.corrcoef(pred_chi2, true_chi2)[0, 1],
+        'Weighted Correlation': weighted_cov(true_chi2, pred_chi2, w) / np.sqrt(
+            weighted_cov(true_chi2, true_chi2, w)*weighted_cov(pred_chi2, pred_chi2, w)
+        )
     }
 
 # -----------------------------------------
@@ -299,13 +319,6 @@ def perform_ldsc_regression(ld_scores,
                           if ldc['Symbol'] in c and c != ldc['WeightCol']]
 
         reg_counts = annot_data['Annotation sum'][ldc['alpha']][:1, :len(ld_score_names)]
-
-        """
-        if ldc['Symbol'][-len(ldc['Name']):] in ['UL2', 'L2', 'LD2']:
-            reg_counts = np.array([list(annot_data['MAF Normalized sum'][:len(ld_score_names)])])
-        else:
-            reg_counts = copy.deepcopy(ldc['Counts'])
-        """
 
         if cache_reg_df:
             write_pbz2(os.path.join(res_cache_dir, f"{ldc['Name']}.pbz2"), (
