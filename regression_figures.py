@@ -917,68 +917,57 @@ if __name__ == '__main__':
         combined_global_df = []
         combined_annot_df = []
 
-        for trait_file in glob.glob(os.path.join(regres_dir, "*/regression_res.pbz2")):
+        for trait_file in glob.glob(os.path.join(regres_dir, "*/*.pbz2")):
 
             trait = os.path.basename(os.path.dirname(trait_file))
-
-            print(f">> Plotting for {trait_name_dict[trait]}...")
+            m = os.path.basename(trait_file).replace('.pbz2', '')
 
             trait_reg_res = read_pbz2(trait_file)
 
-            for m in ld_scores_ord:
-                plot_regression_result(trait_reg_res[m],
-                                       f'Regression Result for {trait_name_dict[trait]}',
-                                       os.path.join(plot_dir, trait, 'regression',
-                                                    f'{m}_regression' + fig_format))
+            plot_regression_result(trait_reg_res,
+                                   f'Regression Result for {trait_name_dict[trait]}',
+                                   os.path.join(plot_dir, trait, 'regression',
+                                                f'{m}_regression' + fig_format))
 
             for gm in global_metrics:
-                for m in ld_scores_ord:
-                    combined_global_df.append({
-                        'Trait': trait_name_dict[trait],
-                        'Metric': gm,
-                        'Method': m,
-                        'Score': trait_reg_res[m][gm],
-                        'Score SE': trait_reg_res[m][gm + '_se']
-                    })
-                    combined_global_df.append({
-                        'Trait': trait_name_dict[trait],
-                        'Metric': gm,
-                        'Method': 'S-' + m,
-                        'Score': trait_reg_res['S-' + m][gm],
-                        'Score SE': trait_reg_res['S-' + m][gm + '_se']
-                    })
+                combined_global_df.append({
+                    'Trait': trait_name_dict[trait],
+                    'Metric': gm,
+                    'Method': m,
+                    'Score': trait_reg_res[gm],
+                    'Score SE': trait_reg_res[gm + '_se']
+                })
 
-                plot_global_metric_estimates(trait, trait_reg_res, metric=gm)
+                #plot_global_metric_estimates(trait, trait_reg_res, metric=gm)
 
-            for an in annotation_metrics:
-
-                for m in ld_scores_ord:
+            if 'S-' in m:
+                for an in annotation_metrics:
 
                     try:
                         combined_annot_df.extend([{
                             'Trait': trait_name_dict[trait],
                             'Metric': an,
-                            'Method': 'S-' + m,
+                            'Method': m,
                             'Annotation': annot_name,
                             'Score': annot_val,
                             'Score SE': annot_val_se
                         } for annot_name, annot_val, annot_val_se in
-                            zip(trait_reg_res['S-' + m]['Annotations']['Names'],
-                                trait_reg_res['S-' + m]['Annotations'][an],
-                                np.abs(trait_reg_res['S-' + m]['Annotations'][an + '_se'])
+                            zip(trait_reg_res['Annotations']['Names'],
+                                trait_reg_res['Annotations'][an],
+                                np.abs(trait_reg_res['Annotations'][an + '_se'])
                                 )
                         ])
                     except KeyError:
                         combined_annot_df.extend([{
                             'Trait': trait_name_dict[trait],
                             'Metric': an,
-                            'Method': 'S-' + m,
+                            'Method': m,
                             'Annotation': annot_name,
                             'Score': annot_val,
                             'Score SE': 0.0
                         } for annot_name, annot_val in
-                            zip(trait_reg_res['S-' + m]['Annotations']['Names'],
-                                trait_reg_res['S-' + m]['Annotations'][an]
+                            zip(trait_reg_res['Annotations']['Names'],
+                                trait_reg_res['Annotations'][an]
                                 )
                         ])
 

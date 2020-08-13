@@ -41,9 +41,9 @@ metrics = [
     'Mean Difference',
     'Weighted Mean Difference',
     'Mean Squared Difference',
-    'Weighted Squared Mean Difference',
     'Correlation',
-    'Weighted Correlation'
+    'Weighted Correlation',
+    'Weighted Mean Squared Difference'
     ]
 
 
@@ -51,7 +51,13 @@ annot_res = []
 global_res = []
 all_snps_chi2 = []
 
-for trait_file in glob.glob("results/regression/EUR/M_5_50_chi2filt/*/*.pbz2"):
+result_set = "2"
+
+if result_set != "2":
+    metrics[-1] = 'Weighted Squared Mean Difference'
+
+
+for trait_file in glob.glob(f"results{result_set}/regression/EUR/M_5_50_chi2filt/*/*.pbz2"):
     trait_res = read_pbz2(trait_file)
     trait_name = os.path.basename(os.path.dirname(trait_file))
 
@@ -60,21 +66,30 @@ for trait_file in glob.glob("results/regression/EUR/M_5_50_chi2filt/*/*.pbz2"):
 
             for mbin, mbin_res in trait_res['Predictive Performance']['Per MAF bin'].items():
                 for metric in metrics:
+
                     global_res.append({
                         'Trait': trait_name,
                         'MAFbin': mbin - 1,
                         'Metric': metric,
-                        'Score': mbin_res[metric],
                         'Method': m
                     })
+
+                    if result_set == "2":
+                       global_res[-1]['Score'] = mbin_res['Mean'][metric].flatten()[0]
+                    else:
+                        global_res[-1]['Score'] = mbin_res[metric]
 
             for metric in metrics + ['Mean Predicted Chisq']:
                 all_snps_chi2.append({
                     'Trait': trait_name,
                     'Metric': metric,
-                    'Score': trait_res['Predictive Performance']['Overall'][metric],
                     'Method': m
                 })
+
+                if result_set == "2":
+                    all_snps_chi2[-1]['Score'] = trait_res['Predictive Performance']['Overall']['Mean'][metric].flatten()[0]
+                else:
+                    all_snps_chi2[-1]['Score'] = trait_res['Predictive Performance']['Overall'][metric]
 
             if partitioned:
                 for ann, ann_res in trait_res['Annotations']['Predictive Performance'].items():
@@ -86,22 +101,26 @@ for trait_file in glob.glob("results/regression/EUR/M_5_50_chi2filt/*/*.pbz2"):
                                 'Trait': trait_name,
                                 'MAFbin': mbin,
                                 'Metric': metric,
-                                'Score': mbin_res[metric],
                                 'Method': m
                             })
+
+                            if result_set == "2":
+                                annot_res[-1]['Score'] = mbin_res['Mean'][metric].flatten()[0]
+                            else:
+                                annot_res[-1]['Score'] = mbin_res[metric]
 
 annot_res = pd.DataFrame(annot_res)
 global_res = pd.DataFrame(global_res)
 all_snps_chi2 = pd.DataFrame(all_snps_chi2)
 
-print(f'Average {metric} across all traits and SNP categories:')
+print(f'Average metrics across all traits and SNP categories:')
 print(all_snps_chi2.groupby(['Method', 'Metric']).mean())
 
 print('= = = = = = =')
 
-makedir("figures/analysis/global")
-makedir("figures/analysis/annotation")
-makedir("figures/analysis/highly_enriched_annotation")
+makedir(f"figures{result_set}/analysis/global")
+makedir(f"figures{result_set}/analysis/annotation")
+makedir(f"figures{result_set}/analysis/highly_enriched_annotation")
 
 for metric in metrics:
 
@@ -112,7 +131,7 @@ for metric in metrics:
                 palette=ld_scores_colors)
     plt.xlabel('MAF Decile bin')
     plt.ylabel(metric)
-    plt.savefig(f"figures/analysis/global/{metric}{fig_format}")
+    plt.savefig(f"figures{result_set}/analysis/global/{metric}{fig_format}")
     plt.close()
 
     if partitioned:
@@ -123,7 +142,7 @@ for metric in metrics:
                     palette=ld_scores_colors)
         plt.xlabel('MAF Decile bin')
         plt.ylabel(metric)
-        plt.savefig(f"figures/analysis/annotation/{metric}{fig_format}")
+        plt.savefig(f"figures{result_set}/analysis/annotation/{metric}{fig_format}")
         plt.close()
 
         highly_enriched_cats = [
@@ -147,5 +166,5 @@ for metric in metrics:
                     palette=ld_scores_colors)
         plt.xlabel('MAF Decile bin')
         plt.ylabel(metric)
-        plt.savefig(f"figures/analysis/highly_enriched_annotation/{metric}{fig_format}")
+        plt.savefig(f"figures{result_set}/analysis/highly_enriched_annotation/{metric}{fig_format}")
         plt.close()

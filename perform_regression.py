@@ -256,17 +256,17 @@ def read_modified_ldscores(
     return data
 
 
-def weighted_cov(chi2, pred_chi2, w):
+def weighted_cov(pred_chi2, true_chi2, w):
     """
     Used to compute weighted correlation as defined by Speed, Holmes and Balding
     https://www.biorxiv.org/content/10.1101/736496v2.full
     """
-    return np.dot((1./w).T, chi2*pred_chi2)*np.sum(1./w) - np.dot((1./w).T, chi2)*np.dot((1./w).T, pred_chi2)
+    return np.dot(w, true_chi2*pred_chi2) - np.dot(w, true_chi2)*np.dot(w, pred_chi2)
 
 
-def weighted_corr(chi2, pred_chi2, w):
-    return weighted_cov(chi2, pred_chi2, w) / np.sqrt(
-        weighted_cov(chi2, chi2, w) * weighted_cov(pred_chi2, pred_chi2, w)
+def weighted_corr(pred_chi2, true_chi2, w):
+    return weighted_cov(true_chi2, pred_chi2, w) / np.sqrt(
+        weighted_cov(true_chi2, true_chi2, w) * weighted_cov(pred_chi2, pred_chi2, w)
     )
 
 
@@ -274,46 +274,19 @@ def predict_chi2(tau, intercept, ld_scores, N):
     return N*np.dot(ld_scores, tau) + intercept
 
 
-def compute_prediction_metrics(pred_chi2, true_chi2, w, compute_jknife=True):
+def compute_prediction_metrics(pred_chi2, true_chi2, w):
 
-    metric_functions = {
-        'Mean Predicted Chisq': lambda p, t, w: np.array([np.mean(p)]).reshape(-1, 1),
-        'Mean True Chisq': lambda p, t, w: np.array([np.mean(t)]).reshape(-1, 1),
-        'Mean Difference': lambda p, t, w: np.array([np.mean(p - t)]).reshape(-1, 1),
-        'Weighted Mean Difference': lambda p, t, w: np.array([np.mean((1./w)*(p - t))]).reshape(-1, 1),
-        'Mean Squared Difference': lambda p, t, w: np.array([np.mean((p - t)**2)]).reshape(-1, 1),
-        'Weighted Mean Squared Difference': lambda p, t, w: np.array([np.mean((1./w)*(p - t)**2)]).reshape(-1, 1),
-        'Correlation': lambda p, t, w: np.array([np.corrcoef(p.flatten(), t.flatten())[0, 1]]).reshape(-1, 1),
-        'Weighted Correlation': lambda p, t, w: np.array([weighted_corr(t, p, w)]).reshape(-1, 1)
+    return {
+        'Mean Predicted Chisq': np.mean(pred_chi2),
+        'Mean True Chisq': np.mean(true_chi2),
+        'Mean Difference': np.mean(pred_chi2 - true_chi2),
+        'Weighted Mean Difference': np.dot(w, pred_chi2 - true_chi2),
+        'Mean Squared Difference': np.mean((pred_chi2 - true_chi2)**2),
+        'Weighted Mean Squared Difference': np.dot(w, (pred_chi2 - true_chi2)**2),
+        'Correlation': np.corrcoef(pred_chi2, true_chi2)[0, 1],
+        'Weighted Correlation': weighted_corr(pred_chi2, true_chi2, w)
     }
 
-    b_jk_estimates = {}
-    mean_estimates = {}
-
-    if compute_jknife:
-        try:
-            jk = Jackknife([pred_chi2.reshape(-1, 1),
-                            true_chi2.reshape(-1, 1),
-                            w.reshape(-1, 1)], n_blocks=200)
-        except ValueError:
-            compute_jknife = False
-
-    for m, m_func in metric_functions.items():
-
-        mean_estimates[m] = m_func(pred_chi2, true_chi2, w)
-
-        if compute_jknife:
-            b_jk_estimates = jk.resample(m_func)
-
-    if compute_jknife:
-        return {
-            'Mean': mean_estimates,
-            'Block Jackknife': b_jk_estimates
-        }
-    else:
-        return {
-            'Mean': mean_estimates
-        }
 
 # -----------------------------------------
 # Perform regressions:
@@ -388,11 +361,11 @@ def perform_ldsc_regression(ld_scores,
             'Coefficients': list(zip(ld_score_names, reg.coef))
         }
 
-        ld_weighs = np.sqrt(np.maximum(nss_df[ldc['WeightCol']].values, 1.))
-        ld_weighs /= float(np.sum(ld_weighs))
+        ld_weights = np.maximum(nss_df[ldc['WeightCol']].values, 1.)
+        ld_weights /= float(np.sum(ld_weights))
 
         ldc['Regression']['LRT'] = get_model_lrt(reg.coef, reg.intercept,
-                                                 nss_df, ld_score_names, ld_weighs)
+                                                 nss_df, ld_score_names, ld_weights)
         ldc['Regression']['LRT_se'] = 0.0
 
         pred_chi2 = predict_chi2(reg.coef, reg.intercept,
@@ -401,7 +374,7 @@ def perform_ldsc_regression(ld_scores,
         ldc['Regression']['Predictive Performance'] = {
             'Overall': compute_prediction_metrics(pred_chi2,
                                                   nss_df['CHISQ'].values,
-                                                  1./ld_weighs),
+                                                  ld_weights),
             'Per MAF bin': {}
         }
 
@@ -410,7 +383,7 @@ def perform_ldsc_regression(ld_scores,
             ldc['Regression']['Predictive Performance']['Per MAF bin'][i] = compute_prediction_metrics(
                 pred_chi2[maf_subset],
                 nss_df.loc[maf_subset, 'CHISQ'].values,
-                1./ld_weighs[maf_subset]
+                ld_weights[maf_subset]
             )
 
         if ldc['Annotation']:
@@ -482,7 +455,7 @@ def perform_ldsc_regression(ld_scores,
                 ldc['Regression']['Annotations']['Predictive Performance'][an] = {
                     'Overall': compute_prediction_metrics(pred_chi2[ann_subset],
                                                           nss_df.loc[ann_subset, 'CHISQ'].values,
-                                                          1. / ld_weighs[ann_subset]),
+                                                          ld_weights[ann_subset]),
                     'Per MAF bin': {}
                 }
 
@@ -491,7 +464,7 @@ def perform_ldsc_regression(ld_scores,
                     ldc['Regression']['Annotations']['Predictive Performance'][an]['Per MAF bin'][i] = compute_prediction_metrics(
                         pred_chi2[ann_subset & maf_subset],
                         nss_df.loc[ann_subset & maf_subset, 'CHISQ'].values,
-                        1. / ld_weighs[ann_subset & maf_subset]
+                        ld_weights[ann_subset & maf_subset]
                     )
 
         write_pbz2(os.path.join(output_dir, f"{ldc['Name']}.pbz2"),

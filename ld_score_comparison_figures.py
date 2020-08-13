@@ -336,7 +336,7 @@ def read_merge_ld_scores(chr_num):
 if __name__ == '__main__':
 
     plot_dir = "figures/ld_score_comparison_test/"
-    analysis_dir = "results/analysis/ld_score_comparison_test"
+    analysis_dir = "results2/analysis/ld_score_comparison_test"
 
     num_procs = 6
 
