@@ -602,7 +602,7 @@ if __name__ == '__main__':
             lds_filter) for _, trait in gwas_traits.iterrows()
         ]
 
-        pool = Pool(3)
+        pool = Pool(4)
         res = pool.starmap(perform_ldsc_regression, args)
         pool.close()
         pool.join()
