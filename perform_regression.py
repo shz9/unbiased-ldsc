@@ -362,6 +362,7 @@ def perform_ldsc_regression(ld_scores,
         }
 
         ld_weights = np.maximum(nss_df[ldc['WeightCol']].values, 1.)
+        ld_weights = 1./ld_weights
         ld_weights /= float(np.sum(ld_weights))
 
         ldc['Regression']['LRT'] = get_model_lrt(reg.coef, reg.intercept,
@@ -575,7 +576,7 @@ if __name__ == '__main__':
             lds_filter) for _, trait in gwas_traits.iterrows()
         ]
 
-        pool = Pool(4)
+        pool = Pool(3)
         res = pool.starmap(perform_ldsc_regression, args)
         pool.close()
         pool.join()
