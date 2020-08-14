@@ -32,7 +32,7 @@ ld_scores_colors = {
     }
 
 partitioned = False
-methods = ['R2_0.0', 'R2_0.25', 'R2_0.5', 'R2_0.75', 'R2_1.0']
+methods = ['D2_0.0', 'D2_0.25', 'D2_0.5', 'D2_0.75', 'D2_1.0']
 
 if partitioned:
     methods = ['S-' + m for m in methods]
@@ -61,24 +61,25 @@ for trait_file in glob.glob(f"results/regression/EUR/M_5_50_chi2filt/*/*.pbz2"):
 
             for mbin, mbin_res in trait_res['Predictive Performance']['Per MAF bin'].items():
                 for metric in metrics:
-
                     global_res.append({
                         'Trait': trait_name,
                         'MAFbin': mbin - 1,
                         'Metric': metric,
-                        'Method': m
+                        'Method': m,
+                        'Score': mbin_res[metric]
                     })
 
-                    global_res[-1]['Score'] = mbin_res[metric]
-
-            for metric in metrics + ['Mean Predicted Chisq']:
+            for metric in metrics + ['Mean Predicted Chisq', 'LRT']:
                 all_snps_chi2.append({
                     'Trait': trait_name,
                     'Metric': metric,
-                    'Method': m
+                    'Method': m,
                 })
 
-                all_snps_chi2[-1]['Score'] = trait_res['Predictive Performance']['Overall'][metric]
+                if metric == 'LRT':
+                    all_snps_chi2[-1]['Score'] = trait_res['LRT']
+                else:
+                    all_snps_chi2[-1]['Score'] = trait_res['Predictive Performance']['Overall'][metric]
 
             if partitioned:
                 for ann, ann_res in trait_res['Annotations']['Predictive Performance'].items():
@@ -90,10 +91,9 @@ for trait_file in glob.glob(f"results/regression/EUR/M_5_50_chi2filt/*/*.pbz2"):
                                 'Trait': trait_name,
                                 'MAFbin': mbin,
                                 'Metric': metric,
-                                'Method': m
+                                'Method': m,
+                                'Score': mbin_res[metric]
                             })
-
-                            annot_res[-1]['Score'] = mbin_res[metric]
 
 annot_res = pd.DataFrame(annot_res)
 global_res = pd.DataFrame(global_res)

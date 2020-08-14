@@ -361,16 +361,19 @@ def perform_ldsc_regression(ld_scores,
             'Coefficients': list(zip(ld_score_names, reg.coef))
         }
 
-        ld_weights = np.maximum(nss_df[ldc['WeightCol']].values, 1.)
-        ld_weights = 1./ld_weights
+        pred_chi2 = predict_chi2(reg.coef, reg.intercept,
+                                 nss_df[ld_score_names].values, np.mean(nss_df[['N']].values))
+
+        ld_w = np.maximum(nss_df[ldc['WeightCol']].values, 1.)
+        ld_w = 1. / ld_w
+        het_w = 1./(2.*pred_chi2**2)
+
+        ld_weights = ld_w*het_w
         ld_weights /= float(np.sum(ld_weights))
 
         ldc['Regression']['LRT'] = get_model_lrt(reg.coef, reg.intercept,
                                                  nss_df, ld_score_names, ld_weights)
         ldc['Regression']['LRT_se'] = 0.0
-
-        pred_chi2 = predict_chi2(reg.coef, reg.intercept,
-                                 nss_df[ld_score_names].values, np.mean(nss_df[['N']].values))
 
         ldc['Regression']['Predictive Performance'] = {
             'Overall': compute_prediction_metrics(pred_chi2,
