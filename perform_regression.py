@@ -11,6 +11,8 @@ from multiprocessing import Pool
 from ldsc.ldscore.regressions import Hsq
 from utils import write_pbz2, read_pbz2
 from Jackknife import Jackknife
+from ldsc.ldscore.irwls import IRWLS
+from ldsc.ldscore.jackknife import LstsqJackknifeFast
 
 
 def bin_regression_df(reg_df, ld_colname, w_ld_colname):
@@ -216,6 +218,7 @@ def read_modified_ldscores(
         ld_ref_file="output/ld_scores/1000G_Phase3_EUR_mldscores/{ldc}/LD.%d.l2.ldscore.gz",
         ld_w_file="output/ld_scores_weights/1000G_Phase3_EUR_mldscores/{ldc}/LD.%d.l2.ldscore.gz",
         ld_estimator=("R2", "D2"),
+        compare_against=None,
         alpha=(0., .25, .5, .75, 1.)):
 
     print("> Reading modified LD Scores...")
@@ -225,7 +228,7 @@ def read_modified_ldscores(
 
         score_symbol = f"{lde}_{a}"
 
-        if score_symbol not in reg_ld_scores:
+        if score_symbol not in reg_ld_scores + [compare_against]:
             continue
 
         modified_scores, modified_M = read_ld_scores_parallel(
@@ -274,9 +277,10 @@ def predict_chi2(tau, intercept, ld_scores, N):
     return N*np.dot(ld_scores, tau) + intercept
 
 
-def compute_prediction_metrics(pred_chi2, true_chi2, w):
+def compute_prediction_metrics(pred_chi2, true_chi2, w,
+                               other_weights=None, normalize_weights=True):
 
-    return {
+    pred_metrics = {
         'Mean Predicted Chisq': np.mean(pred_chi2),
         'Mean True Chisq': np.mean(true_chi2),
         'Mean Difference': np.mean(pred_chi2 - true_chi2),
@@ -286,6 +290,41 @@ def compute_prediction_metrics(pred_chi2, true_chi2, w):
         'Correlation': np.corrcoef(pred_chi2, true_chi2)[0, 1],
         'Weighted Correlation': weighted_corr(pred_chi2, true_chi2, w)
     }
+
+    if normalize_weights:
+        nw = w / float(np.sum(w))
+
+        pred_metrics.update(
+            {
+                '(Normalized) Weighted Mean Difference': np.dot(nw, pred_chi2 - true_chi2),
+                '(Normalized) Weighted Mean Squared Difference': np.dot(nw, (pred_chi2 - true_chi2) ** 2),
+                '(Normalized) Weighted Correlation': weighted_corr(pred_chi2, true_chi2, nw)
+            }
+        )
+
+    if other_weights is not None:
+        for w_name, ow in other_weights.items():
+
+            pred_metrics.update(
+                {
+                    f'Weighted Mean Difference ({w_name})': np.dot(nw, pred_chi2 - true_chi2),
+                    f'Weighted Mean Squared Difference ({w_name})': np.dot(nw,(pred_chi2 - true_chi2) ** 2),
+                    f'Weighted Correlation ({w_name})': weighted_corr(pred_chi2, true_chi2, nw)
+                }
+            )
+
+            if normalize_weights:
+                onw = ow / float(np.sum(ow))
+                pred_metrics.update(
+                    {
+                        f'(Normalized) Weighted Mean Difference ({w_name})': np.dot(onw, pred_chi2 - true_chi2),
+                        f'(Normalized) Weighted Mean Squared Difference ({w_name})': np.dot(onw,
+                                                                                            (pred_chi2 - true_chi2)**2),
+                        f'(Normalized) Weighted Correlation ({w_name})': weighted_corr(pred_chi2, true_chi2, onw)
+                    }
+                )
+
+    return pred_metrics
 
 
 # -----------------------------------------
@@ -317,6 +356,7 @@ def perform_ldsc_regression(ld_scores,
         print(f"> Regressing with {ldc['Name']}...")
 
         if lds_filter:
+            # This filter isn't used anymore...
             base_scores = ldc['LDScores']['base' + ldc['Symbol']]
             mean_sc, std_sc = base_scores.mean(), base_scores.std()
 
@@ -364,12 +404,106 @@ def perform_ldsc_regression(ld_scores,
         pred_chi2 = predict_chi2(reg.coef, reg.intercept,
                                  nss_df[ld_score_names].values, np.mean(nss_df[['N']].values))
 
-        ld_w = np.maximum(nss_df[ldc['WeightCol']].values, 1.)
-        ld_w = 1. / ld_w
-        het_w = 1./(2.*pred_chi2**2)
+        ########################################
+        # Compute LD Score only weights:
+        ld_w = 1./np.maximum(nss_df[ldc['WeightCol']].values, 1.)
+        ld_weights = ld_w / float(np.sum(ld_w))
 
-        ld_weights = ld_w*het_w
-        ld_weights /= float(np.sum(ld_weights))
+        # The rest of the weights are supplementary and for the purposes of analysis:
+        other_weights = {}
+        ################################################################################
+        # Compute LD Score Weights according to IRWLS procedure:
+        M_tot = float(np.sum(reg_counts))
+        x_tot = np.sum(nss_df[ld_score_names].values, axis=1).reshape((-1, 1))
+        tot_agg = reg.aggregate(
+            nss_df[['CHISQ']].values,
+            x_tot,
+            nss_df[['N']].values,
+            M_tot,
+            None
+        )
+        ldsc_w = reg._update_weights(
+            x_tot,
+            nss_df[[ldc['WeightCol']]].values,
+            nss_df[['N']].values,
+            M_tot,
+            tot_agg,
+            None
+        )
+
+        ldsc_w /= float(np.sum(ldsc_w))
+        other_weights['RWLS Weights'] = ldsc_w
+
+        ########################################
+        ########################################
+        ########################################
+        # Assuming we have a reference model to use its weights, do the analysis here:
+
+        if compare_against is not None and ldc['Annotation']:
+            weights_from = 'S-' + compare_against
+        else:
+            weights_from = compare_against
+
+        # To test correctness of implementation below, remove the second condition
+        if weights_from is not None and weights_from != ldc['Name']:
+            ref_ldc = [l for l in ld_scores if l['Name'] == weights_from][0]
+
+            ref_nss_df = pd.merge(ref_ldc['LDScores'], ss_df)
+            ref_nss_df = ref_nss_df.loc[ref_nss_df['SNP'].isin(common_snps)]
+
+            ref_ld_score_names = [c for c in ref_ldc['LDScores'].columns
+                                  if ref_ldc['Symbol'] in c and c != ref_ldc['WeightCol']]
+
+            ref_reg_counts = annot_data['Annotation sum'][ref_ldc['alpha']][:1, :len(ref_ld_score_names)]
+
+            ########################################
+            # Compute LD Score Weights (of reference model) according to IRWLS procedure:
+
+            M_tot = float(np.sum(ref_reg_counts))
+            x_tot = np.sum(ref_nss_df[ref_ld_score_names].values, axis=1).reshape((-1, 1))
+            tot_agg = reg.aggregate(
+                ref_nss_df[['CHISQ']].values,
+                x_tot,
+                ref_nss_df[['N']].values,
+                M_tot,
+                None
+            )
+            ref_ldsc_w = reg._update_weights(
+                x_tot,
+                ref_nss_df[[ref_ldc['WeightCol']]].values,
+                ref_nss_df[['N']].values,
+                M_tot,
+                tot_agg,
+                None
+            )
+
+            ref_ldsc_weights = ref_ldsc_w / float(np.sum(ref_ldsc_w))
+            other_weights[f'{compare_against} RWLS Weights'] = ref_ldsc_weights
+
+            # Performing the regression with the ref RWLS weights:
+            x = np.concatenate((nss_df[ld_score_names].values, np.ones((len(nss_df), 1))), axis=1)
+            initial_w = np.sqrt(ref_ldsc_w)
+            x = IRWLS._weight(x, initial_w)
+            y = IRWLS._weight(nss_df[['CHISQ']].values, initial_w)
+            jknife = LstsqJackknifeFast(x, y, reg.n_blocks)
+
+            reweighted_coef = jknife.est[0, :-1] / np.mean(nss_df[['N']].values)
+            reweighted_intercept = jknife.est[0, -1]
+
+            reweighted_pred_chi2 = predict_chi2(reweighted_coef, reweighted_intercept,
+                                                nss_df[ld_score_names].values,
+                                                np.mean(nss_df[['N']].values))
+
+            ########################################
+            # Compute LD Score only weights (from reference model):
+            ref_ld_w = 1. / np.maximum(ref_nss_df[ref_ldc['WeightCol']].values, 1.)
+            ref_ld_weights = ref_ld_w / float(np.sum(ref_ld_w))
+
+            other_weights[f'{compare_against} Weights'] = ref_ld_weights
+
+        ########################################
+        ########################################
+        ########################################
 
         ldc['Regression']['LRT'] = get_model_lrt(reg.coef, reg.intercept,
                                                  nss_df, ld_score_names, ld_weights)
@@ -378,7 +512,8 @@ def perform_ldsc_regression(ld_scores,
         ldc['Regression']['Predictive Performance'] = {
             'Overall': compute_prediction_metrics(pred_chi2,
                                                   nss_df['CHISQ'].values,
-                                                  ld_weights),
+                                                  ld_weights,
+                                                  other_weights=other_weights),
             'Per MAF bin': {}
         }
 
@@ -387,17 +522,35 @@ def perform_ldsc_regression(ld_scores,
             ldc['Regression']['Predictive Performance']['Per MAF bin'][i] = compute_prediction_metrics(
                 pred_chi2[maf_subset],
                 nss_df.loc[maf_subset, 'CHISQ'].values,
-                ld_weights[maf_subset]
+                ld_weights[maf_subset],
+                other_weights={k: v[maf_subset] for k, v in other_weights.items()}
             )
+
+        ####################################
+        # To test correctness of implementation below, remove the second condition
+        if weights_from is not None and weights_from != ldc['Name']:
+            ldc['Regression'][f'Predictive Performance ({weights_from} Weights)'] = {
+                'Overall': compute_prediction_metrics(reweighted_pred_chi2,
+                                                      nss_df['CHISQ'].values,
+                                                      ld_weights,
+                                                      other_weights=other_weights),
+                'Per MAF bin': {}
+            }
+
+            for i in range(1, 11):
+                maf_subset = nss_df['SNP'].isin(annot_data['SNPs per Annotation']['MAFbin' + str(i)])
+                ldc['Regression'][f'Predictive Performance ({weights_from} Weights)']['Per MAF bin'][i] = compute_prediction_metrics(
+                    reweighted_pred_chi2[maf_subset],
+                    nss_df.loc[maf_subset, 'CHISQ'].values,
+                    ld_weights[maf_subset],
+                    other_weights={k: v[maf_subset] for k, v in other_weights.items()}
+                )
+
+        ####################################
 
         if ldc['Annotation']:
 
             cov_mat = copy.deepcopy(annot_data['Covariance'][ldc['alpha']])
-
-            overlap_annot2 = reg._overlap_output(
-                ld_score_names, cov_mat,
-                reg_counts, reg_counts[0][0], True
-            )
 
             for i in range(cov_mat.shape[0]):
                 cov_mat[i, :] = ldc['Counts']*cov_mat[i, :] / reg_counts
@@ -411,7 +564,7 @@ def perform_ldsc_regression(ld_scores,
 
             coeff_factor_mod1 = annot_data['Annotation std'][ldc['alpha']] * annot_data['M'] / reg.tot
             coeff_factor_mod2 = annot_data['Annotation std'][1.]*reg_counts[0][0]/reg.tot
-            
+
             tau_pval = 2.*stats.norm.sf(abs(overlap_annot['Coefficient_z-score'].values))
             tau_pval[tau_pval == 0.] = np.nan
             tau_pval = -np.log10(tau_pval)
@@ -431,8 +584,6 @@ def perform_ldsc_regression(ld_scores,
                 'hg2_se': overlap_annot['Prop._h2_std_error'].values,
                 'enrichment': overlap_annot['Enrichment'].values.clip(min=0.),
                 'enrichment_se': overlap_annot['Enrichment_std_error'].values,
-                'enrichment2': overlap_annot2['Enrichment'].values.clip(min=0.),
-                'enrichment2_se': overlap_annot2['Enrichment_std_error'].values,
                 'differential_enrichment': diff_enrichment,
                 'differential_enrichment_se': diff_enrichment_se,
                 'tau': overlap_annot['Coefficient'].values,
@@ -493,6 +644,7 @@ if __name__ == '__main__':
     reg_ld_scores = args.ld_scores.split(',')
     cache_reg_df = False
     num_procs = 6
+    compare_against = reg_ld_scores[:1] + "2_1.0"
 
     filter_configs = [(True, True, False)]
     #filter_configs = product(*[[True, False]] * 3)
@@ -562,7 +714,7 @@ if __name__ == '__main__':
         all_ld_scores = []
 
         #all_ld_scores += read_baseline_ldscores()
-        all_ld_scores += read_modified_ldscores()
+        all_ld_scores += read_modified_ldscores(compare_against=compare_against)
 
         common_snps = list(set.intersection(*map(set, [ldc['LDScores']['SNP'] for ldc in all_ld_scores])))
 
@@ -579,7 +731,7 @@ if __name__ == '__main__':
             lds_filter) for _, trait in gwas_traits.iterrows()
         ]
 
-        pool = Pool(3)
+        pool = Pool(2)
         res = pool.starmap(perform_ldsc_regression, args)
         pool.close()
         pool.join()
