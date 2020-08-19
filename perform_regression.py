@@ -329,8 +329,7 @@ def compute_prediction_metrics(pred_chi2, true_chi2, w,
 # Perform regressions:
 
 
-def perform_ldsc_regression(ld_scores,
-                            trait_info,
+def perform_ldsc_regression(trait_info,
                             annot_data,
                             chi2_filter=True,
                             lds_filter=True):
@@ -349,7 +348,7 @@ def perform_ldsc_regression(ld_scores,
 
     print(f">>> Processing GWAS summary statistics for {trait_name}...")
 
-    for ldc in ld_scores:
+    for ldc in all_ld_scores:
 
         print(f"> Regressing with {ldc['Name']}...")
 
@@ -444,7 +443,7 @@ def perform_ldsc_regression(ld_scores,
 
         # To test correctness of implementation below, remove the second condition
         if weights_from is not None and weights_from != ldc['Name']:
-            ref_ldc = [l for l in ld_scores if l['Name'] == weights_from][0]
+            ref_ldc = [l for l in all_ld_scores if l['Name'] == weights_from][0]
 
             ref_nss_df = pd.merge(ref_ldc['LDScores'], ss_df)
             ref_nss_df = ref_nss_df.loc[ref_nss_df['SNP'].isin(common_snps)]
@@ -724,8 +723,7 @@ if __name__ == '__main__':
         gwas_traits = pd.read_csv(sumstats_file)
 
         args = [
-            (all_ld_scores,
-            trait,
+            (trait,
             annot_data,
             chi2_filter,
             lds_filter) for _, trait in gwas_traits.iterrows()
