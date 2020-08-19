@@ -430,7 +430,7 @@ def perform_ldsc_regression(ld_scores,
         )
 
         ldsc_w /= float(np.sum(ldsc_w))
-        other_weights['RWLS Weights'] = ldsc_w
+        other_weights['RWLS Weights'] = ldsc_w.flatten()
 
         ########################################
         ########################################
@@ -476,7 +476,7 @@ def perform_ldsc_regression(ld_scores,
             )
 
             ref_ldsc_weights = ref_ldsc_w / float(np.sum(ref_ldsc_w))
-            other_weights[f'{compare_against} RWLS Weights'] = ref_ldsc_weights
+            other_weights[f'{compare_against} RWLS Weights'] = ref_ldsc_weights.flatten()
 
             # Performing the regression with the ref RWLS weights:
             x = np.concatenate((nss_df[ld_score_names].values, np.ones((len(nss_df), 1))), axis=1)
@@ -731,7 +731,7 @@ if __name__ == '__main__':
             lds_filter) for _, trait in gwas_traits.iterrows()
         ]
 
-        pool = Pool(2)
+        pool = Pool(3)
         res = pool.starmap(perform_ldsc_regression, args)
         pool.close()
         pool.join()
