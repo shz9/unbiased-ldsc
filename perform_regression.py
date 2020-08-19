@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import os
-import sys
 from scipy import stats
 import copy
 import argparse
@@ -10,7 +9,6 @@ from gamma_glm_model import get_model_lrt
 from multiprocessing import Pool
 from ldsc.ldscore.regressions import Hsq
 from utils import write_pbz2, read_pbz2
-from Jackknife import Jackknife
 from ldsc.ldscore.irwls import IRWLS
 from ldsc.ldscore.jackknife import LstsqJackknifeFast
 
@@ -228,7 +226,7 @@ def read_modified_ldscores(
 
         score_symbol = f"{lde}_{a}"
 
-        if score_symbol not in reg_ld_scores + [compare_against]:
+        if score_symbol not in [reg_ld_scores, compare_against]:
             continue
 
         modified_scores, modified_M = read_ld_scores_parallel(
@@ -307,9 +305,9 @@ def compute_prediction_metrics(pred_chi2, true_chi2, w,
 
             pred_metrics.update(
                 {
-                    f'Weighted Mean Difference ({w_name})': np.dot(nw, pred_chi2 - true_chi2),
-                    f'Weighted Mean Squared Difference ({w_name})': np.dot(nw,(pred_chi2 - true_chi2) ** 2),
-                    f'Weighted Correlation ({w_name})': weighted_corr(pred_chi2, true_chi2, nw)
+                    f'Weighted Mean Difference ({w_name})': np.dot(ow, pred_chi2 - true_chi2),
+                    f'Weighted Mean Squared Difference ({w_name})': np.dot(ow, (pred_chi2 - true_chi2) ** 2),
+                    f'Weighted Correlation ({w_name})': weighted_corr(pred_chi2, true_chi2, ow)
                 }
             )
 
@@ -513,7 +511,8 @@ def perform_ldsc_regression(ld_scores,
             'Overall': compute_prediction_metrics(pred_chi2,
                                                   nss_df['CHISQ'].values,
                                                   ld_weights,
-                                                  other_weights=other_weights),
+                                                  other_weights=other_weights,
+                                                  normalize_weights=False),
             'Per MAF bin': {}
         }
 
@@ -533,7 +532,8 @@ def perform_ldsc_regression(ld_scores,
                 'Overall': compute_prediction_metrics(reweighted_pred_chi2,
                                                       nss_df['CHISQ'].values,
                                                       ld_weights,
-                                                      other_weights=other_weights),
+                                                      other_weights=other_weights,
+                                                      normalize_weights=False),
                 'Per MAF bin': {}
             }
 
@@ -641,7 +641,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     ref_pop = args.pop  # Reference population
-    reg_ld_scores = args.ld_scores.split(',')
+    reg_ld_scores = args.ld_scores
     cache_reg_df = False
     num_procs = 6
     compare_against = reg_ld_scores[:1] + "2_1.0"
