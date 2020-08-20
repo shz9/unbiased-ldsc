@@ -611,7 +611,8 @@ def perform_ldsc_regression(trait_info,
                     'Overall': compute_prediction_metrics(pred_chi2[ann_subset],
                                                           nss_df.loc[ann_subset, 'CHISQ'].values,
                                                           ld_weights[ann_subset],
-                                                          other_weights=other_weights),
+                                                          other_weights={k: v[ann_subset]
+                                                                         for k, v in other_weights.items()}),
                     'Per MAF bin': {}
                 }
 
@@ -621,7 +622,8 @@ def perform_ldsc_regression(trait_info,
                         pred_chi2[ann_subset & maf_subset],
                         nss_df.loc[ann_subset & maf_subset, 'CHISQ'].values,
                         ld_weights[ann_subset & maf_subset],
-                        other_weights=other_weights
+                        other_weights={k: v[ann_subset & maf_subset]
+                                       for k, v in other_weights.items()}
                     )
 
         write_pbz2(os.path.join(output_dir, f"{ldc['Name']}.pbz2"),
