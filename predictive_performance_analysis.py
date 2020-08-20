@@ -32,7 +32,7 @@ ld_scores_colors = {
         'S-R2_1.0': '#F28E2B'
     }
 
-partitioned = False
+partitioned = True
 use_normalized_weights = False
 methods = ['R2_0.0', 'R2_0.25', 'R2_0.5', 'R2_0.75', 'R2_1.0']
 reference_model = 'R2_1.0'
@@ -61,15 +61,7 @@ metrics = [
     f'Weighted Mean Squared Difference ({reference_model} RWLS Weights)'
     ]
 
-exclude_traits = [
-    'PASS_BMI1',
-    'PASS_Coronary_Artery_Disease',
-    'PASS_HDL',
-    'PASS_Height1',
-    'PASS_LDL',
-    'PASS_Rheumatoid_Arthritis',
-    'PASS_Type_2_Diabetes'
-]
+exclude_traits = []
 
 annot_res = []
 global_res = []
@@ -108,7 +100,7 @@ for trait_file in glob.glob(f"results/regression/EUR/M_5_50_chi2filt/*/*.pbz2"):
 
                     global_res.append({
                         'Trait': trait_name,
-                        'MAFbin': mbin - 1,
+                        'MAFbin': mbin,
                         'Metric': metric,
                         'Method': m,
                         'Score': mbin_res[score]
@@ -138,7 +130,16 @@ for trait_file in glob.glob(f"results/regression/EUR/M_5_50_chi2filt/*/*.pbz2"):
             if partitioned:
                 for ann, ann_res in trait_res['Annotations'][perf_cat].items():
                     for mbin, mbin_res in ann_res['Per MAF bin'].items():
+                        print(mbin, mbin_res)
                         for metric in metrics:
+
+                            if m == reference_model and m in metric:
+                                if 'RWLS' in metric:
+                                    score = metric.replace(reference_model + ' ', '')
+                                else:
+                                    score = metric.split('(')[0].strip()
+                            else:
+                                score = metric
 
                             annot_res.append({
                                 'Annotation': ann,
@@ -146,7 +147,7 @@ for trait_file in glob.glob(f"results/regression/EUR/M_5_50_chi2filt/*/*.pbz2"):
                                 'MAFbin': mbin,
                                 'Metric': metric,
                                 'Method': m,
-                                'Score': mbin_res[metric]
+                                'Score': mbin_res[score]
                             })
 
 annot_res = pd.DataFrame(annot_res)
@@ -157,22 +158,24 @@ mean_across_traits = all_snps_chi2.groupby(['Method', 'Metric']).mean()
 print(f'Average metrics across all traits and SNP categories:')
 print(mean_across_traits)
 
+makedir(f"analysis/{['', 'partitioned/'][partitioned]}{performance_category}/binned")
+
 for metric in metrics:
     all_snps_chi2.loc[all_snps_chi2['Metric'] == metric].pivot(
         index='Method', columns='Trait', values='Score'
-    ).to_excel(f"{metric}.xls")
+    ).to_excel(f"analysis/{performance_category}/{metric}.xls")
 
     global_res.loc[global_res['Metric'] == metric].pivot_table(
         index=['Method', 'MAFbin'],
         columns='Trait',
         values='Score'
-    ).to_excel(f"binned_{metric}.xls")
+    ).to_excel(f"analysis/{performance_category}/binned/{metric}.xls")
 
 print('= = = = = = =')
 
-makedir(f"figures/analysis/{performance_category}/global")
-makedir(f"figures/analysis/{performance_category}/annotation")
-makedir(f"figures/analysis/{performance_category}/highly_enriched_annotation")
+makedir(f"figures/analysis/{['', 'partitioned/'][partitioned]}{performance_category}/global")
+makedir(f"figures/analysis/{['', 'partitioned/'][partitioned]}{performance_category}/annotation")
+makedir(f"figures/analysis/{['', 'partitioned/'][partitioned]}{performance_category}/highly_enriched_annotation")
 
 for metric in metrics:
 
@@ -189,7 +192,7 @@ for metric in metrics:
                     ls='--', color=ld_scores_colors[m],
                     label=f"{m}: {global_val:.3e}")
     plt.legend()
-    plt.savefig(f"figures/analysis/{performance_category}/global/{metric}{fig_format}")
+    plt.savefig(f"figures/analysis/{['', 'partitioned/'][partitioned]}{performance_category}/global/{metric}{fig_format}")
     plt.close()
 
     if partitioned:
@@ -200,7 +203,7 @@ for metric in metrics:
                     palette=ld_scores_colors)
         plt.xlabel('MAF Decile bin')
         plt.ylabel(metric)
-        plt.savefig(f"figures/analysis/{performance_category}/annotation/{metric}{fig_format}")
+        plt.savefig(f"figures/analysis/{['', 'partitioned/'][partitioned]}{performance_category}/annotation/{metric}{fig_format}")
         plt.close()
 
         highly_enriched_cats = [
@@ -224,5 +227,5 @@ for metric in metrics:
                     palette=ld_scores_colors)
         plt.xlabel('MAF Decile bin')
         plt.ylabel(metric)
-        plt.savefig(f"figures/analysis/{performance_category}/highly_enriched_annotation/{metric}{fig_format}")
+        plt.savefig(f"figures/analysis/{['', 'partitioned/'][partitioned]}{performance_category}/highly_enriched_annotation/{metric}{fig_format}")
         plt.close()

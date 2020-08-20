@@ -476,7 +476,7 @@ def perform_ldsc_regression(trait_info,
             )
 
             ref_ldsc_weights = ref_ldsc_w / float(np.sum(ref_ldsc_w))
-            other_weights[f'{compare_against} RWLS Weights'] = ref_ldsc_weights.flatten()
+            other_weights[f'{weights_from} RWLS Weights'] = ref_ldsc_weights.flatten()
 
             # Performing the regression with the ref RWLS weights:
             x = np.concatenate((nss_df[ld_score_names].values, np.ones((len(nss_df), 1))), axis=1)
@@ -497,7 +497,7 @@ def perform_ldsc_regression(trait_info,
             ref_ld_w = 1. / np.maximum(ref_nss_df[ref_ldc['WeightCol']].values, 1.)
             ref_ld_weights = ref_ld_w / float(np.sum(ref_ld_w))
 
-            other_weights[f'{compare_against} Weights'] = ref_ld_weights
+            other_weights[f'{weights_from} Weights'] = ref_ld_weights
 
         ########################################
         ########################################
@@ -610,7 +610,8 @@ def perform_ldsc_regression(trait_info,
                 ldc['Regression']['Annotations']['Predictive Performance'][an] = {
                     'Overall': compute_prediction_metrics(pred_chi2[ann_subset],
                                                           nss_df.loc[ann_subset, 'CHISQ'].values,
-                                                          ld_weights[ann_subset]),
+                                                          ld_weights[ann_subset],
+                                                          other_weights=other_weights),
                     'Per MAF bin': {}
                 }
 
@@ -619,7 +620,8 @@ def perform_ldsc_regression(trait_info,
                     ldc['Regression']['Annotations']['Predictive Performance'][an]['Per MAF bin'][i] = compute_prediction_metrics(
                         pred_chi2[ann_subset & maf_subset],
                         nss_df.loc[ann_subset & maf_subset, 'CHISQ'].values,
-                        ld_weights[ann_subset & maf_subset]
+                        ld_weights[ann_subset & maf_subset],
+                        other_weights=other_weights
                     )
 
         write_pbz2(os.path.join(output_dir, f"{ldc['Name']}.pbz2"),
