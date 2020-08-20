@@ -42,7 +42,6 @@ def compute_annot_stats(annot_file_struct, frq_file_struct,
     """
 
     w_annot_dfs = []
-    snps_per_maf_bin = [[] for _ in range(10)]
 
     for chr_num in range(22, 0, -1):
 
@@ -50,24 +49,17 @@ def compute_annot_stats(annot_file_struct, frq_file_struct,
         adf = pd.read_csv(annot_file_struct % chr_num, sep="\s+")
         frq_df = pd.read_csv(frq_file_struct % chr_num, sep="\s+")
 
-        if maf_5_50:
-            frq_df = frq_df.loc[frq_df['MAF'] > 0.05, ]
-
         frq_df['MAFVAR'] = 2.*frq_df['MAF']*(1. - frq_df['MAF'])
         adf = adf.loc[adf['SNP'].isin(frq_df['SNP']), ]
 
-        mna_df = pd.merge(frq_df[['SNP', 'MAFVAR']],
+        mna_df = pd.merge(frq_df[['SNP', 'MAF', 'MAFVAR']],
                           adf.iloc[:, [2] + list(range(4, len(adf.columns)))])
-
-        snps_per_maf_bin = [s + list(adf.loc[adf['MAFbin' + str(i)] == 1, 'SNP'].values)
-                            for i, s in enumerate(snps_per_maf_bin, 1)]
 
         w_annot_dfs.append(mna_df)
 
     w_annots = pd.concat(w_annot_dfs)
-    mafvars = w_annots[['MAFVAR']].copy()
 
-    binary_annots = [c for c in w_annots.columns[2:]
+    binary_annots = [c for c in w_annots.columns[3:]
                      if len(np.unique(w_annots[c])) == 2]
 
     snps_per_annotation = {
@@ -75,7 +67,16 @@ def compute_annot_stats(annot_file_struct, frq_file_struct,
         if b_an != 'base' and 'flanking.500' not in b_an
     }
 
-    w_annots = w_annots.iloc[:, 2:]
+    snps_per_annotation['MAFbin0'] = w_annots.loc[
+        w_annots[[f'MAFbin{i}' for i in range(1, 11)]].eq(0).all(1),
+        'SNP'
+    ].values
+
+    if maf_5_50:
+        w_annots = w_annots.loc[w_annots['MAF'] > 0.05, ]
+
+    mafvars = w_annots[['MAFVAR']].copy()
+    w_annots = w_annots.iloc[:, 3:]
 
     w_annots_std = {
         a: ((mafvars.values**(1. - a))*w_annots).std().values
@@ -272,7 +273,7 @@ def weighted_corr(pred_chi2, true_chi2, w):
 
 
 def predict_chi2(tau, intercept, ld_scores, N):
-    return N*np.dot(ld_scores, tau) + intercept
+    return np.dot(N*ld_scores, tau) + intercept
 
 
 def compute_prediction_metrics(pred_chi2, true_chi2, w,
@@ -344,7 +345,7 @@ def perform_ldsc_regression(trait_info,
     ss_df['CHISQ'] = ss_df['Z']**2
 
     if chi2_filter:
-        ss_df = ss_df.loc[ss_df['CHISQ'] <= max(80., 0.001*ss_df['N'][0]), ]
+        ss_df = ss_df.loc[ss_df['CHISQ'] <= max(80., 0.001*np.mean(ss_df['N'])), ]
 
     print(f">>> Processing GWAS summary statistics for {trait_name}...")
 
@@ -384,7 +385,7 @@ def perform_ldsc_regression(trait_info,
         ldc['Regression'] = {
             'method': ldc['Name'],
             'binned_dataframe': bin_df,
-            'N': nss_df[['N']].values[0],
+            'N': np.mean(nss_df[['N']].values),
             'M': annot_data['M'],
             'Annotation Sum': reg_counts,
             'Counts': ldc['Counts'],
@@ -399,7 +400,7 @@ def perform_ldsc_regression(trait_info,
         }
 
         pred_chi2 = predict_chi2(reg.coef, reg.intercept,
-                                 nss_df[ld_score_names].values, np.mean(nss_df[['N']].values))
+                                 nss_df[ld_score_names].values, nss_df[['N']].values)
 
         ########################################
         # Compute LD Score only weights:
@@ -489,7 +490,7 @@ def perform_ldsc_regression(trait_info,
 
             reweighted_pred_chi2 = predict_chi2(reweighted_coef, reweighted_intercept,
                                                 nss_df[ld_score_names].values,
-                                                np.mean(nss_df[['N']].values))
+                                                nss_df[['N']].values)
 
             ########################################
             # Compute LD Score only weights (from reference model):
@@ -515,7 +516,7 @@ def perform_ldsc_regression(trait_info,
             'Per MAF bin': {}
         }
 
-        for i in range(1, 11):
+        for i in range(11):
             maf_subset = nss_df['SNP'].isin(annot_data['SNPs per Annotation']['MAFbin' + str(i)])
             ldc['Regression']['Predictive Performance']['Per MAF bin'][i] = compute_prediction_metrics(
                 pred_chi2[maf_subset],
@@ -536,7 +537,7 @@ def perform_ldsc_regression(trait_info,
                 'Per MAF bin': {}
             }
 
-            for i in range(1, 11):
+            for i in range(11):
                 maf_subset = nss_df['SNP'].isin(annot_data['SNPs per Annotation']['MAFbin' + str(i)])
                 ldc['Regression'][f'Predictive Performance ({weights_from} Weights)']['Per MAF bin'][i] = compute_prediction_metrics(
                     reweighted_pred_chi2[maf_subset],
