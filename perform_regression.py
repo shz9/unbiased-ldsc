@@ -739,7 +739,6 @@ if __name__ == '__main__':
         for _, trait in gwas_traits.iterrows():
 
             perform_ldsc_regression(
-                all_ld_scores,
                 trait,
                 annot_data,
                 chi2_filter,
