@@ -479,7 +479,10 @@ def perform_ldsc_regression(trait_info,
             other_weights[f'{weights_from} RWLS Weights'] = ref_ldsc_weights.flatten()
 
             # Performing the regression with the ref RWLS weights:
-            x = np.concatenate((nss_df[ld_score_names].values, np.ones((len(nss_df), 1))), axis=1)
+
+            x = np.multiply(nss_df[['N']].values,
+                            nss_df[ld_score_names].values) / np.mean(nss_df[['N']].values)
+            x = np.concatenate((x, np.ones((len(nss_df), 1))), axis=1)
             initial_w = np.sqrt(ref_ldsc_w)
             x = IRWLS._weight(x, initial_w)
             y = IRWLS._weight(nss_df[['CHISQ']].values, initial_w)
@@ -616,7 +619,7 @@ def perform_ldsc_regression(trait_info,
                     'Per MAF bin': {}
                 }
 
-                for i in range(1, 11):
+                for i in range(11):
                     maf_subset = nss_df['SNP'].isin(annot_data['SNPs per Annotation']['MAFbin' + str(i)])
                     ldc['Regression']['Annotations']['Predictive Performance'][an]['Per MAF bin'][i] = compute_prediction_metrics(
                         pred_chi2[ann_subset & maf_subset],

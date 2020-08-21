@@ -41,7 +41,21 @@ if partitioned:
     methods = ['S-' + m for m in methods]
     reference_model = 'S-' + reference_model
 
-performance_category = 'Predictive Performance'  # f'Predictive Performance ({reference_model} Weights)'
+# 'Predictive Performance'
+performance_category = f'Predictive Performance ({reference_model} Weights)'
+
+highly_enriched_cats = [
+            'Coding_UCSC',
+            'Conserved_LindbladToh',
+            'GERP.RSsup4',
+            'synonymous',
+            'Conserved_Vertebrate_phastCons46way',
+            'Conserved_Mammal_phastCons46way',
+            'Conserved_Primate_phastCons46way',
+            'BivFlnk',
+            'Ancient_Sequence_Age_Human_Promoter',
+            'Human_Promoter_Villar_ExAC'
+        ]
 
 metrics = [
     'Mean Difference',
@@ -130,7 +144,6 @@ for trait_file in glob.glob(f"results/regression/EUR/M_5_50_chi2filt/*/*.pbz2"):
             if partitioned:
                 for ann, ann_res in trait_res['Annotations'][perf_cat].items():
                     for mbin, mbin_res in ann_res['Per MAF bin'].items():
-                        print(mbin, mbin_res)
                         for metric in metrics:
 
                             if m == reference_model and m in metric:
@@ -163,13 +176,13 @@ makedir(f"analysis/{['', 'partitioned/'][partitioned]}{performance_category}/bin
 for metric in metrics:
     all_snps_chi2.loc[all_snps_chi2['Metric'] == metric].pivot(
         index='Method', columns='Trait', values='Score'
-    ).to_excel(f"analysis/{performance_category}/{metric}.xls")
+    ).to_excel(f"analysis/{['', 'partitioned/'][partitioned]}{performance_category}/{metric}.xls")
 
     global_res.loc[global_res['Metric'] == metric].pivot_table(
         index=['Method', 'MAFbin'],
         columns='Trait',
         values='Score'
-    ).to_excel(f"analysis/{performance_category}/binned/{metric}.xls")
+    ).to_excel(f"analysis/{['', 'partitioned/'][partitioned]}{performance_category}/binned/{metric}.xls")
 
 print('= = = = = = =')
 
@@ -205,19 +218,6 @@ for metric in metrics:
         plt.ylabel(metric)
         plt.savefig(f"figures/analysis/{['', 'partitioned/'][partitioned]}{performance_category}/annotation/{metric}{fig_format}")
         plt.close()
-
-        highly_enriched_cats = [
-            'Coding_UCSC',
-            'Conserved_LindbladToh',
-            'GERP.RSsup4',
-            'synonymous',
-            'Conserved_Vertebrate_phastCons46way',
-            'Conserved_Mammal_phastCons46way',
-            'Conserved_Primate_phastCons46way',
-            'BivFlnk',
-            'Ancient_Sequence_Age_Human_Promoter',
-            'Human_Promoter_Villar_ExAC'
-        ]
 
         plt.subplots(figsize=(10, 8))
         sns.barplot(x='MAFbin', y='Score', hue='Method',
