@@ -351,6 +351,11 @@ def perform_ldsc_regression(trait_info,
 
     for ldc in all_ld_scores:
 
+        if compare_against is not None:
+            if compare_against == ldc['Symbol'] and any([compare_against != l['Symbol']
+                                                         for l in all_ld_scores]):
+                continue
+
         print(f"> Regressing with {ldc['Name']}...")
 
         if lds_filter:
