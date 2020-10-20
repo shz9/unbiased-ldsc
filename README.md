@@ -1,11 +1,11 @@
 # Assumptions about frequency-dependent architectures of complex traits bias measures of functional enrichment
 
-*Authors*: Shadi Zabad, Aaron P. Ragsdale, Rosie Sun, Yue Li, Simon Gravel
+**Authors**: Shadi Zabad, Aaron P. Ragsdale, Rosie Sun, Yue Li, Simon Gravel
 
 This repository contains code to compute LD Scores using the D^2 
 statistic and carry out the analyses discussed in the manuscript.
 
-*Abstract*:
+**Abstract**:
 Linkage-Disequilibrium Score Regression (LDSC) is a popular framework for analyzing GWAS summary statistics that allows
 for estimating SNP heritability, confounding, and functional 
 enrichment of genetic variants with different annotations. 
