@@ -9,7 +9,7 @@ from scipy import stats
 import glob
 import os
 import sys
-from utils import read_pbz2, makedir, get_multiplicative_factor
+from utils import read_pbz2, makedir, get_multiplicative_factor, fig_size
 from rpy2.robjects.packages import importr
 import rpy2.robjects as ro
 
@@ -68,14 +68,6 @@ def plot_regression_result(data,
                            chi2_colname='CHISQ'):
     """
     This function produces figures similar to Figure 2. in Bulik-Sullivan et al. (2015)
-    :param data: a dictionary or list of dictionary that must have the following keys defined:
-    `dataframe`: The regression dataframe
-    `Intercept`: The inferred value of the intercept
-    `hg2`: The inferred heritability estimate
-    `N`: GWAS sample size
-    `MC`: Normalization factor (e.g. `M` or `M_5_50` in LDSC).
-    `method`: Method name
-    :return:
     """
 
     if isinstance(data, dict):
@@ -147,7 +139,7 @@ def plot_global_metric_estimates(trait_name, regression_results,
     x = np.arange(len(methods))
     width = 0.35  # the width of the bars
 
-    fig, ax = plt.subplots(figsize=(10, 7))
+    fig, ax = plt.subplots(figsize=fig_size(hw_ratio=7./10))
 
     if any([y is None for y in univariate_yerr]):
         rects1 = ax.bar(x - width / 2, univariate_mean, width,
@@ -349,7 +341,7 @@ def plot_combined_global_results(metric_df, metric,
         for k, v in se_pivot.to_dict().items()
     }
 
-    fig, ax = plt.subplots(figsize=(15, 10))
+    fig, ax = plt.subplots(figsize=fig_size(hw_ratio=10./15, latex_colwidth_pt=690.0))
 
     width = 1.0
     x = np.arange(len(mean_dict[methods[0]])) * 2 * width * (1 + len(methods) // 2)
@@ -361,7 +353,7 @@ def plot_combined_global_results(metric_df, metric,
                       label=labels_dict[m],
                       color=method_colors[m],
                       error_kw=dict(lw=1, capsize=2, capthick=1))
-        if m[:2] != 'S-':
+        if m[:2] != 'S-' and methods_included != 'univariate':
             for bar in rect:
                 bar.set_hatch('////')
                 bar.set_edgecolor('white')
@@ -430,7 +422,7 @@ def plot_meta_analyzed_annotation_coefficients_scatter(annotation_df,
 
     mean_piv, se_piv = meta_analyze_annot(annotation_df, metric)
 
-    if metric in ['enrichment', 'enrichment2']:
+    if metric in ['enrichment']:
         drop = enrichment_exclude
     else:
         drop = ['base']
@@ -503,7 +495,7 @@ def plot_meta_analyzed_annotation_coefficients_scatter(annotation_df,
         'Functional Annotations': sig_func_annots
     }
 
-    plt.subplots(figsize=(10, 8))
+    plt.subplots(figsize=fig_size(hw_ratio=8./10, latex_colwidth_pt=300.))
 
     for label, annots in plot_cats.items():
         if len(annots) < 1:
@@ -582,7 +574,7 @@ def plot_meta_analyzed_annotation_coefficients_bar(annotation_df,
         for k, v in se_piv.to_dict().items()
     }
 
-    fig, ax = plt.subplots(figsize=(15, 8))
+    fig, ax = plt.subplots(figsize=fig_size(latex_colwidth_pt=690.0))
 
     width = 1.0
     x = np.arange(len(mean_dict[methods[0]])) * 2 * width * (1 + len(methods) // 2)
@@ -681,7 +673,7 @@ def plot_trait_vs_annotation_heatmap(annotation_df, metric,
         include_trait = list(nsig_by_trait[nsig_by_trait > 0].index)
 
         fdf = fdf.loc[fdf['Trait'].isin(include_trait) & fdf['Annotation'].isin(include_annot)]
-    elif metric in ['enrichment', 'enrichment2', 'differential_enrichment']:
+    elif metric in ['enrichment', 'differential_enrichment']:
         fdf = fdf.loc[~fdf['Annotation'].isin(enrichment_exclude)]
 
     piv_dict = {}
@@ -787,7 +779,7 @@ if __name__ == '__main__':
     main_regres_dir = f"results/regression/{ref_pop}"
 
     fig_format = '.svg'
-    sns.set_context('talk')
+    sns.set_context('paper')
     include_title = False
 
     metric_tex = {
@@ -799,7 +791,6 @@ if __name__ == '__main__':
         'tau_star_w2': '$\\tau^*(w2)$',
         'tau': '$\\tau$',
         'enrichment': 'Enrichment',
-        'enrichment2': 'Enrichment 2',
         'differential_enrichment': 'Differential Enrichment'
     }
 
@@ -858,7 +849,6 @@ if __name__ == '__main__':
         'tau_star_w': '{0:.3f}',
         'tau_star_w2': '{0:.3f}',
         'enrichment': '{0:.3f}',
-        'enrichment2': '{0:.3f}',
         'differential_enrichment': '{0:.3e}'
     }
 
@@ -869,8 +859,7 @@ if __name__ == '__main__':
 
     global_metrics = ["hg2", "Intercept", "LRT"]
     annotation_metrics = ["tau", "tau_star", "tau_star_w", "tau_star_w2",
-                          "enrichment", "enrichment2",
-                          "differential_enrichment"]
+                          "enrichment", "differential_enrichment"]
 
     trait_subset = [
         'Height (UKBB)', 'FEV1-FVC Ratio', 'Red Blood Cell Count',
@@ -1021,7 +1010,7 @@ if __name__ == '__main__':
 
             print(f'> Annotation metric {mt}')
 
-            if mt not in ["enrichment", "enrichment2", "differential_enrichment"]:
+            if mt not in ["enrichment", "differential_enrichment"]:
                 plot_meta_analyzed_annotation_coefficients_bar(combined_annot_df, mt)
 
                 if 'R2_1.0' in ld_scores_ord:

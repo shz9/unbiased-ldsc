@@ -5,6 +5,7 @@ import seaborn as sns
 import glob
 import os
 from utils import read_pbz2, makedir
+import sys
 
 
 fig_format = ".png"
@@ -32,30 +33,55 @@ ld_scores_colors = {
         'S-R2_1.0': '#F28E2B'
     }
 
+ld_scores_names = {
+        'D2_0.0': '$\\alpha=0$',
+        'D2_0.25': '$\\alpha=0.25$',
+        'D2_0.5': '$\\alpha=0.5$',
+        'D2_0.75': '$\\alpha=0.75$',
+        'D2_1.0': '$\\alpha=1$',
+        'R2_0.0': '$\\alpha=0$',
+        'R2_0.25': '$\\alpha=0.25$',
+        'R2_0.5': '$\\alpha=0.5$',
+        'R2_0.75': '$\\alpha=0.75$',
+        'R2_1.0': '$\\alpha=1$',
+        'S-D2_0.0': '$\\alpha=0$',
+        'S-D2_0.25': '$\\alpha=0.25$',
+        'S-D2_0.5': '$\\alpha=0.5$',
+        'S-D2_0.75': '$\\alpha=0.75$',
+        'S-D2_1.0': '$\\alpha=1$',
+        'S-R2_0.0': '$\\alpha=0$',
+        'S-R2_0.25': '$\\alpha=0.25$',
+        'S-R2_0.5': '$\\alpha=0.5$',
+        'S-R2_0.75': '$\\alpha=0.75$',
+        'S-R2_1.0': '$\\alpha=1$',
+    }
+
+sns.set_context('talk')
+plot_global_lines = False
 partitioned = True
-use_normalized_weights = False
-methods = ['R2_0.0', 'R2_0.25', 'R2_0.5', 'R2_0.75', 'R2_1.0']
-reference_model = 'R2_1.0'
+use_normalized_weights = True
+methods = ['D2_0.0', 'D2_0.25', 'D2_0.5', 'D2_0.75', 'D2_1.0']
+reference_model = 'D2_1.0'
 
 if partitioned:
     methods = ['S-' + m for m in methods]
     reference_model = 'S-' + reference_model
 
 # 'Predictive Performance'
-performance_category = f'Predictive Performance ({reference_model} Weights)'
+performance_category = 'Predictive Performance' #f'Predictive Performance ({reference_model} Weights)'
 
 highly_enriched_cats = [
-            'Coding_UCSC',
-            'Conserved_LindbladToh',
-            'GERP.RSsup4',
-            'synonymous',
-            'Conserved_Vertebrate_phastCons46way',
-            'Conserved_Mammal_phastCons46way',
-            'Conserved_Primate_phastCons46way',
-            'BivFlnk',
-            'Ancient_Sequence_Age_Human_Promoter',
-            'Human_Promoter_Villar_ExAC'
-        ]
+        'Coding_UCSC',
+        'Conserved_LindbladToh',
+        'GERP.RSsup4',
+        'non_synonymous',
+        'Conserved_Vertebrate_phastCons46way',
+        'Conserved_Mammal_phastCons46way',
+        'Conserved_Primate_phastCons46way',
+        'BivFlnk',
+        'Ancient_Sequence_Age_Human_Promoter',
+        'Human_Promoter_Villar_ExAC'
+    ]
 
 metrics = [
     'Mean Difference',
@@ -141,7 +167,7 @@ for trait_file in glob.glob(f"results/regression/EUR/M_5_50_chi2filt/*/*.pbz2"):
 
                     all_snps_chi2[-1]['Score'] = trait_res[perf_cat]['Overall'][score]
 
-            if partitioned:
+            if partitioned and performance_category == 'Predictive Performance':
                 for ann, ann_res in trait_res['Annotations'][perf_cat].items():
                     for mbin, mbin_res in ann_res['Per MAF bin'].items():
                         for metric in metrics:
@@ -153,6 +179,9 @@ for trait_file in glob.glob(f"results/regression/EUR/M_5_50_chi2filt/*/*.pbz2"):
                                     score = metric.split('(')[0].strip()
                             else:
                                 score = metric
+
+                            if use_normalized_weights and 'Weighted' in score:
+                                score = '(Normalized) ' + score
 
                             annot_res.append({
                                 'Annotation': ann,
@@ -197,25 +226,31 @@ for metric in metrics:
                 data=global_res.loc[global_res['Metric'] == metric], ci=None,
                 hue_order=methods,
                 palette=ld_scores_colors)
-    plt.xlabel('MAF Decile bin')
-    plt.ylabel(metric)
-    for m in np.unique(global_res['Method']):
-        global_val = mean_across_traits.loc[[(m, metric)], 'Score'].values[0]
-        plt.axhline(global_val,
-                    ls='--', color=ld_scores_colors[m],
-                    label=f"{m}: {global_val:.3e}")
-    plt.legend()
+    plt.xlabel('MAF bin')
+    plt.ylabel(metric.split("(")[0].strip().replace('Difference', 'Error') + " ($\\chi^2$)")
+    if plot_global_lines:
+        for m in np.unique(global_res['Method']):
+            global_val = mean_across_traits.loc[[(m, metric)], 'Score'].values[0]
+            plt.axhline(global_val,
+                        ls='--', color=ld_scores_colors[m],
+                        label=f"{m}: {global_val:.3e}")
+    plt.legend(labels=[ld_scores_names[m] for m in methods])
+    plt.ylim(-.18, .23)
+    plt.tight_layout()
     plt.savefig(f"figures/analysis/{['', 'partitioned/'][partitioned]}{performance_category}/global/{metric}{fig_format}")
     plt.close()
 
-    if partitioned:
+    if partitioned and performance_category == 'Predictive Performance':
         plt.subplots(figsize=(10, 8))
         sns.barplot(x='MAFbin', y='Score', hue='Method',
                     data=annot_res.loc[annot_res['Metric'] == metric], ci=None,
                     hue_order=methods,
                     palette=ld_scores_colors)
-        plt.xlabel('MAF Decile bin')
-        plt.ylabel(metric)
+        plt.xlabel('MAF bin')
+        plt.ylabel(metric.split("(")[0].strip().replace('Difference', 'Error') + " ($\\chi^2$)")
+        plt.legend(labels=[ld_scores_names[m] for m in methods])
+        plt.ylim(-.18, .23)
+        plt.tight_layout()
         plt.savefig(f"figures/analysis/{['', 'partitioned/'][partitioned]}{performance_category}/annotation/{metric}{fig_format}")
         plt.close()
 
@@ -225,7 +260,10 @@ for metric in metrics:
                     data=annot_res.loc[annot_res['Annotation'].isin(highly_enriched_cats) &
                                        (annot_res['Metric'] == metric)], ci=None,
                     palette=ld_scores_colors)
-        plt.xlabel('MAF Decile bin')
-        plt.ylabel(metric)
+        plt.xlabel('MAF bin')
+        plt.ylabel(metric.split("(")[0].strip().replace('Difference', 'Error') + " ($\\chi^2$)")
+        plt.legend(labels=[ld_scores_names[m] for m in methods])
+        plt.ylim(-.18, .23)
+        plt.tight_layout()
         plt.savefig(f"figures/analysis/{['', 'partitioned/'][partitioned]}{performance_category}/highly_enriched_annotation/{metric}{fig_format}")
         plt.close()

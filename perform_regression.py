@@ -36,7 +36,7 @@ def compute_annot_stats(annot_file_struct, frq_file_struct,
                         maf_5_50=True, alpha=(0., .25, .5, .75, 1.)):
 
     """
-    This function compute statistics for the model annotations,
+    This function computes statistics for the model annotations,
     including covariance between the annotations, snps per maf bin,
     and sums and MAF-weighted sums of each annotation.
     """
